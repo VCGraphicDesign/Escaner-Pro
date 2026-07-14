@@ -1,0 +1,158 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
+
+:root {
+  --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  --bg-dots: radial-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  --shadow-premium: 0 20px 40px -10px rgba(0, 0, 0, 0.6);
+  --shadow-glow: 0 0 15px rgba(34, 211, 238, 0.25);
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-sans);
+  background-color: #030712; /* Extreme dark gray slate */
+  background-image: var(--bg-dots);
+  background-size: 24px 24px;
+  color: #f3f4f6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+}
+
+/* Styled Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #030712;
+}
+::-webkit-scrollbar-thumb {
+  background: #1f2937;
+  border-radius: 99px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #374151;
+}
+
+#root {
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Button Classes */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+  outline: none;
+  user-select: none;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #22d3ee 0%, #06b6d4 100%);
+  color: #030712;
+  box-shadow: 0 4px 15px -3px rgba(34, 211, 238, 0.4);
+}
+.btn-primary:hover {
+  transform: translateY(-1.5px);
+  box-shadow: 0 8px 20px -3px rgba(34, 211, 238, 0.5), var(--shadow-glow);
+}
+.btn-primary:active {
+  transform: translateY(0);
+}
+
+.btn-secondary {
+  background: #111827;
+  border-color: #374151;
+  color: #d1d5db;
+}
+.btn-secondary:hover {
+  background: #1f2937;
+  color: #ffffff;
+  border-color: #4b5563;
+}
+.btn-secondary:active {
+  background: #111827;
+}
+
+/* Range input styling overrides */
+input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: #1f2937;
+  height: 6px;
+  border-radius: 99px;
+  outline: none;
+}
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #22d3ee;
+  cursor: pointer;
+  box-shadow: 0 0 8px rgba(34, 211, 238, 0.5);
+  border: 2px solid #ffffff;
+  transition: transform 0.1s;
+}
+input[type='range']::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+}
+
+/* Animations keys */
+@keyframes zoomIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.animate-zoom-in {
+  animation: zoomIn 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.animate-fade-in {
+  animation: fadeIn 0.15s ease-out forwards;
+}
+
+/* Camera viewport custom scale container */
+@media (max-width: 768px) {
+  .crop-screen img, .edit-screen img {
+    max-width: 92vw !important;
+  }
+}
+
+/* Editor text input focus animations */
+input:focus {
+  box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.2);
+}
+
+/* Dragging overlay elements sizing */
+.crop-screen svg, .crop-screen img {
+  user-select: none;
+  -webkit-user-drag: none;
+}
