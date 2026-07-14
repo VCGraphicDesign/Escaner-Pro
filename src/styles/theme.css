@@ -1,0 +1,15 @@
+/* Variables CSS del sistema de diseño */
+:root {
+  --bg-primary: #0F0F0F;
+  --bg-surface: #1C1C1E;
+  --bg-card: #2C2C2E;
+  --accent: #2979FF;
+  --accent-hover: #1565C0;
+  --text-primary: #FFFFFF;
+  --text-secondary: #8E8E93;
+  --text-disabled: #48484A;
+  --border-radius-card: 14px;
+  --border-radius-btn: 10px;
+  --shadow-card: 0 2px 8px rgba(0,0,0,0.4);
+  --font-family: 'Inter', 'Poppins', sans-serif;
+}

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Download, FileText, Image as ImageIcon, X } from 'lucide-react';
 import { jsPDF } from 'jspdf';
-import type { ScannedPage } from '../services/db';
+import type { ScannedPage } from '../../services/documentStore';
 
 interface SaveDialogProps {
   pages: ScannedPage[];

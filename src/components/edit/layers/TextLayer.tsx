@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { Trash2, Type, Check } from 'lucide-react';
-import type { TextLayer } from '../services/db';
+import type { TextLayer } from '../../../services/documentStore';
 
 
 interface TextLayerEditorProps {
