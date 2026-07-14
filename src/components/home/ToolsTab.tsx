@@ -478,7 +478,8 @@ export default function ToolsTab({ onStartNewScan }: ToolsTabProps) {
               <ArrowLeft size={18} />
             </button>
             <div>
-              <h3 className="text-xs font-bold text-[#2979FF] uppercase tracking-widest">
+              <h3 className="text-xs font-bold text-[#2979FF] uppercase tracking-widest flex items-center gap-2">
+                <Wrench size={14} />
                 Herramienta
               </h3>
               <h2 className="text-base font-bold text-white capitalize">
