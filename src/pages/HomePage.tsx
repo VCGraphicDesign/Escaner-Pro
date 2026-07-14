@@ -67,7 +67,11 @@ export default function HomePage({ onStartNewScan, onEditDocument }: HomePagePro
       <header className="p-5 bg-[#1C1C1E] border-b border-[#2C2C2E] flex items-center justify-between z-10 shrink-0">
         <div className="flex items-center gap-2.5">
           <div className="w-9 h-9 rounded-xl bg-[#2979FF] flex items-center justify-center text-white shadow-md shadow-[#2979FF]/20">
-            <Camera size={18} strokeWidth={2.5} />
+            {activeTab === 'documents' ? (
+              <Camera size={18} strokeWidth={2.5} />
+            ) : (
+              <Wrench size={18} strokeWidth={2.5} />
+            )}
           </div>
           <div>
             <h1 className="text-base font-bold tracking-tight text-white leading-tight">
