@@ -24,7 +24,9 @@ import {
   ArrowDown,
   Trash2,
   Sliders,
-  Plus
+  Plus,
+  RotateCcw,
+  Edit
 } from 'lucide-react';
 import { DocumentItem, ScannedPage, CropPoints } from '../../types';
 import { getDocuments, saveDocument, createDefaultAdjustments } from '../../services/documentStore';
@@ -35,7 +37,7 @@ interface ToolsTabProps {
   onStartNewScan: () => void;
 }
 
-type ActiveToolType = 'none' | 'recortar' | 'borrar' | 'combinar' | 'mejorar';
+type ActiveToolType = 'none' | 'recortar' | 'borrar' | 'combinar' | 'mejorar' | 'correccion_angulo' | 'herramientas_edicion';
 
 export default function ToolsTab({ onStartNewScan }: ToolsTabProps) {
   const [activeTool, setActiveTool] = useState<ActiveToolType>('none');
@@ -461,6 +463,46 @@ export default function ToolsTab({ onStartNewScan }: ToolsTabProps) {
               </div>
               <ChevronRight size={18} className="text-gray-500 group-hover:text-white transition-colors" />
             </button>
+
+            {/* Opción Corrección de Ángulo */}
+            <button
+              onClick={() => {
+                setActiveTool('correccion_angulo');
+                resetToolStates();
+              }}
+              className="flex items-center gap-4 p-4 rounded-xl border border-[#2C2C2E] bg-[#1C1C1E] hover:bg-[#2C2C2E]/60 hover:border-[#2979FF]/40 transition-all text-left group"
+            >
+              <div className="p-3 rounded-xl bg-[#FF6B6B]/10 text-[#FF6B6B] group-hover:scale-105 transition-transform">
+                <RotateCcw size={24} />
+              </div>
+              <div className="flex-1">
+                <h4 className="text-sm font-bold text-white">Corrección de Ángulo</h4>
+                <p className="text-[11px] text-gray-400 mt-0.5">
+                  Alinea el texto horizontalmente para mejorar el reconocimiento de caracteres (OCR).
+                </p>
+              </div>
+              <ChevronRight size={18} className="text-gray-500 group-hover:text-white transition-colors" />
+            </button>
+
+            {/* Opción Herramientas de Edición */}
+            <button
+              onClick={() => {
+                setActiveTool('herramientas_edicion');
+                resetToolStates();
+              }}
+              className="flex items-center gap-4 p-4 rounded-xl border border-[#2C2C2E] bg-[#1C1C1E] hover:bg-[#2C2C2E]/60 hover:border-[#2979FF]/40 transition-all text-left group"
+            >
+              <div className="p-3 rounded-xl bg-[#4ECDC4]/10 text-[#4ECDC4] group-hover:scale-105 transition-transform">
+                <Edit size={24} />
+              </div>
+              <div className="flex-1">
+                <h4 className="text-sm font-bold text-white">Herramientas de Edición</h4>
+                <p className="text-[11px] text-gray-400 mt-0.5">
+                  Permiten eliminar imperfecciones específicas como perforaciones o bordes negros residuales.
+                </p>
+              </div>
+              <ChevronRight size={18} className="text-gray-500 group-hover:text-white transition-colors" />
+            </button>
           </div>
         </>
       )}
@@ -487,6 +529,8 @@ export default function ToolsTab({ onStartNewScan }: ToolsTabProps) {
                 {activeTool === 'borrar' && 'Borrar e Limpiar'}
                 {activeTool === 'combinar' && 'Combinar Archivos'}
                 {activeTool === 'mejorar' && 'Mejorar Claridad'}
+                {activeTool === 'correccion_angulo' && 'Corrección de Ángulo'}
+                {activeTool === 'herramientas_edicion' && 'Herramientas de Edición'}
               </h2>
             </div>
           </div>
@@ -615,7 +659,7 @@ export default function ToolsTab({ onStartNewScan }: ToolsTabProps) {
             </div>
           )}
 
-          {/* PASO 1: SELECCIONAR IMAGEN (PARA RECORTAR / BORRAR / MEJORAR) */}
+          {/* PASO 1: SELECCIONAR IMAGEN (PARA RECORTAR / BORRAR / MEJORAR / CORRECCIÓN ÁNGULO / HERRAMIENTAS EDICIÓN) */}
           {activeTool !== 'combinar' && !selectedImage && (
             <div className="flex flex-col gap-4 animate-fade-in">
               <p className="text-xs text-gray-400">
@@ -897,6 +941,83 @@ export default function ToolsTab({ onStartNewScan }: ToolsTabProps) {
                 >
                   Elegir otra imagen
                 </button>
+              </div>
+            </div>
+          )}
+
+          {/* PASO 2: EDICIÓN ACTIVA DE CORRECCIÓN DE ÁNGULO */}
+          {selectedImage && activeTool === 'correccion_angulo' && (
+            <div className="flex flex-col gap-4 animate-fade-in">
+              <p className="text-xs text-gray-400">
+                Esta herramienta alinea el texto horizontalmente para mejorar el reconocimiento de caracteres (OCR).
+              </p>
+
+              {/* Preview de la Imagen */}
+              <div className="border border-[#2C2C2E] rounded-2xl bg-neutral-950 p-2 overflow-hidden flex flex-col items-center justify-center relative min-h-[250px]">
+                <img
+                  src={selectedImage}
+                  alt="Imagen para corrección de ángulo"
+                  className="max-h-[40vh] object-contain rounded-xl shadow-lg"
+                  referrerPolicy="no-referrer"
+                />
+              </div>
+
+              {/* Controles de Corrección de Ángulo */}
+              <div className="bg-[#1C1C1E] border border-[#2C2C2E] rounded-2xl p-4 flex flex-col gap-4">
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex justify-between text-[10px] font-bold text-gray-500 uppercase tracking-wider">
+                    <span>Rotación:</span>
+                    <span className="text-[#FF6B6B]">0°</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="-45"
+                    max="45"
+                    defaultValue="0"
+                    className="w-full accent-[#FF6B6B]"
+                  />
+                </div>
+
+                <p className="text-[10px] text-gray-500 text-center">
+                  Funcionalidad en desarrollo - Próximamente podrás rotar automáticamente para alinear el texto.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* PASO 2: EDICIÓN ACTIVA DE HERRAMIENTAS DE EDICIÓN */}
+          {selectedImage && activeTool === 'herramientas_edicion' && (
+            <div className="flex flex-col gap-4 animate-fade-in">
+              <p className="text-xs text-gray-400">
+                Estas herramientas permiten eliminar imperfecciones específicas como perforaciones o bordes negros residuales.
+              </p>
+
+              {/* Preview de la Imagen */}
+              <div className="border border-[#2C2C2E] rounded-2xl bg-neutral-950 p-2 overflow-hidden flex flex-col items-center justify-center relative min-h-[250px]">
+                <img
+                  src={selectedImage}
+                  alt="Imagen para herramientas de edición"
+                  className="max-h-[40vh] object-contain rounded-xl shadow-lg"
+                  referrerPolicy="no-referrer"
+                />
+              </div>
+
+              {/* Opciones de Edición */}
+              <div className="bg-[#1C1C1E] border border-[#2C2C2E] rounded-2xl p-4 flex flex-col gap-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <button className="py-3 px-4 rounded-xl text-xs font-bold border border-[#2C2C2E] bg-[#1C1C1E] hover:bg-[#2C2C2E] transition-all flex items-center justify-center gap-2 text-white">
+                    <Eraser size={14} />
+                    Eliminar Bordes
+                  </button>
+                  <button className="py-3 px-4 rounded-xl text-xs font-bold border border-[#2C2C2E] bg-[#1C1C1E] hover:bg-[#2C2C2E] transition-all flex items-center justify-center gap-2 text-white">
+                    <Crop size={14} />
+                    Recortar Márgenes
+                  </button>
+                </div>
+
+                <p className="text-[10px] text-gray-500 text-center">
+                  Funcionalidad en desarrollo - Próximamente podrás eliminar imperfecciones específicas.
+                </p>
               </div>
             </div>
           )}
