@@ -73,7 +73,7 @@ export default function ToolsTab({ onStartNewScan }: ToolsTabProps) {
     brightness: 100,
     contrast: 110,
     sharpness: 50,
-    filter: 'auto' as 'original' | 'auto' | 'bw' | 'grayscale' | 'enhanced',
+    filter: 'auto' as 'original' | 'auto' | 'bw' | 'grayscale' | 'enhanced' | 'gamma',
   });
   const [improving, setImproving] = useState(false);
   const [improvedImagePreview, setImprovedImagePreview] = useState<string | null>(null);
@@ -794,6 +794,16 @@ export default function ToolsTab({ onStartNewScan }: ToolsTabProps) {
                       }`}
                     >
                       Realzado
+                    </button>
+                    <button
+                      onClick={() => setImprovementAdjustments(prev => ({ ...prev, filter: 'gamma' }))}
+                      className={`py-1.5 px-1 text-[10px] font-bold rounded-lg border transition-all text-center ${
+                        improvementAdjustments.filter === 'gamma' 
+                          ? 'bg-[#2979FF] border-[#2979FF] text-white' 
+                          : 'bg-neutral-900 border-[#2C2C2E] text-gray-400 hover:text-white'
+                      }`}
+                    >
+                      Gamma
                     </button>
                   </div>
                 </div>

@@ -31,7 +31,7 @@ export async function processPageImage(
     brightness: number;
     contrast: number;
     sharpness: number;
-    filter: 'original' | 'auto' | 'bw' | 'grayscale' | 'enhanced';
+    filter: 'original' | 'auto' | 'bw' | 'grayscale' | 'enhanced' | 'gamma';
     rotation: number;
     crop: CropPoints | null;
   }
@@ -119,6 +119,9 @@ export async function processPageImage(
     // Combinación de iluminación balanceada y mejora de bordes
     normalizeIllumination(canvas);
     applyColorEnhancement(canvas);
+  } else if (adjustments.filter === 'gamma') {
+    // Corrección gamma para eliminar sombras, manchas y ruido
+    applyGammaCorrection(canvas);
   }
 
   // 5. Aplicar Nitidez (Sharpness) si es mayor a cero
@@ -464,6 +467,39 @@ export function applySharpness(canvas: HTMLCanvasElement, amount: number) {
         data[idx + c] = Math.min(255, Math.max(0, val));
       }
     }
+  }
+
+  ctx.putImageData(imgData, 0, 0);
+}
+
+/**
+ * Corrección Gamma para eliminar sombras, manchas y ruido, optimizando la legibilidad del texto.
+ * Aplica una curva gamma que aclara las sombras y mantiene los detalles en las áreas claras.
+ */
+export function applyGammaCorrection(canvas: HTMLCanvasElement) {
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  const w = canvas.width;
+  const h = canvas.height;
+  const imgData = ctx.getImageData(0, 0, w, h);
+  const data = imgData.data;
+
+  // Valor gamma de 0.7 para aclarar sombras sin sobreexponer
+  // Valores < 1 aclaran la imagen, valores > 1 oscurecen
+  const gamma = 0.7;
+  const gammaCorrection = new Uint8Array(256);
+  
+  // Pre-calcular tabla de corrección gamma
+  for (let i = 0; i < 256; i++) {
+    gammaCorrection[i] = Math.min(255, Math.max(0, Math.pow(i / 255, 1 / gamma) * 255));
+  }
+
+  // Aplicar corrección gamma a cada canal de color
+  for (let i = 0; i < data.length; i += 4) {
+    data[i] = gammaCorrection[data[i]];         // R
+    data[i + 1] = gammaCorrection[data[i + 1]]; // G
+    data[i + 2] = gammaCorrection[data[i + 2]]; // B
   }
 
   ctx.putImageData(imgData, 0, 0);
