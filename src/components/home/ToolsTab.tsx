@@ -380,22 +380,6 @@ export default function ToolsTab({ onStartNewScan }: ToolsTabProps) {
       {/* MENU PRINCIPAL DE HERRAMIENTAS */}
       {activeTool === 'none' && (
         <>
-          {/* Banner de Presentación */}
-          <div className="relative overflow-hidden bg-gradient-to-br from-[#2979FF]/10 to-[#1C1C1E] border border-[#2979FF]/20 rounded-2xl p-5">
-            <div className="absolute top-0 right-0 -translate-y-4 translate-x-4 w-24 h-24 bg-[#2979FF]/5 rounded-full blur-2xl"></div>
-            <div className="flex items-start gap-4">
-              <div className="p-3 bg-[#2979FF] text-white rounded-xl shadow-lg shadow-[#2979FF]/20">
-                <Wrench size={20} />
-              </div>
-              <div className="flex-1 min-w-0">
-                <h3 className="text-sm font-bold text-white mb-1">Caja de Herramientas</h3>
-                <p className="text-[11px] text-gray-400 leading-relaxed">
-                  Utilidades avanzadas offline para potenciar, corregir, estructurar y refinar todos tus documentos escaneados.
-                </p>
-              </div>
-            </div>
-          </div>
-
           {/* Opciones de Herramientas */}
           <div className="flex flex-col gap-4">
             {/* Opción Recortar */}
