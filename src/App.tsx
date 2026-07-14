@@ -22,7 +22,7 @@ import {
   saveDocumentProject,
   deleteDocumentProject,
 } from './services/db';
-import type { DocumentProject, ScannedPage } from './services/db';
+import type { DocumentProject, ScannedPage, TextLayer } from './services/db';
 
 import { CameraScanner } from './components/CameraScanner';
 import { PerspectiveCropper } from './components/PerspectiveCropper';
@@ -54,7 +54,21 @@ function App() {
   };
 
   useEffect(() => {
-    loadDocuments();
+    let active = true;
+    const initLoad = async () => {
+      try {
+        const docs = await getAllDocumentProjects();
+        if (active) {
+          setDocuments(docs);
+        }
+      } catch (err) {
+        console.error('Error fetching documents from local storage:', err);
+      }
+    };
+    initLoad();
+    return () => {
+      active = false;
+    };
   }, []);
 
   // Return to Home list dashboard
@@ -275,7 +289,7 @@ function App() {
   };
 
   // Callback from Text layer editor widget
-  const handleTextLayerChange = (updatedTexts: any[]) => {
+  const handleTextLayerChange = (updatedTexts: TextLayer[]) => {
     if (!activeProject) return;
     const updatedPages = activeProject.pages.map((p, idx) => {
       if (idx === activePageIndex) {

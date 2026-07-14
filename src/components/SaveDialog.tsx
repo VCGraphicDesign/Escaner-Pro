@@ -16,7 +16,7 @@ export const SaveDialog: React.FC<SaveDialogProps> = ({
   onConfirm,
   onCancel,
 }) => {
-  const [fileName, setFileName] = useState(defaultName || `Documento_${Date.now()}`);
+  const [fileName, setFileName] = useState(() => defaultName || `Documento_${Date.now()}`);
   const [format, setFormat] = useState<'pdf' | 'jpg' | 'png'>('pdf');
   const [isExporting, setIsExporting] = useState(false);
 

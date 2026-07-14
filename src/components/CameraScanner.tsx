@@ -9,83 +9,106 @@ interface CameraScannerProps {
 
 export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCancel }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const [stream, setStream] = useState<MediaStream | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
   const [activeCameraId, setActiveCameraId] = useState<string>('');
   const [hasError, setHasError] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Load list of cameras
-  const getCameras = async () => {
-    try {
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      const videoDevices = devices.filter((device) => device.kind === 'videoinput');
-      setCameras(videoDevices);
-
-      if (videoDevices.length > 0) {
-        // Prefer rear camera if available
-        const environmentCamera = videoDevices.find(
-          (d) => d.label.toLowerCase().includes('back') || d.label.toLowerCase().includes('environment')
-        );
-        setActiveCameraId(environmentCamera?.deviceId || videoDevices[0].deviceId);
-      }
-    } catch (err: any) {
-      console.error('Error listing cameras:', err);
-    }
-  };
-
-  // Start Camera Stream
-  const startStream = async (deviceId: string) => {
-    if (stream) {
-      stream.getTracks().forEach((track) => track.stop());
-    }
-
-    try {
-      const constraints: MediaStreamConstraints = {
-        video: deviceId
-          ? { deviceId: { exact: deviceId }, width: { ideal: 1920 }, height: { ideal: 1080 } }
-          : { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
-      };
-
-      const mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
-      setStream(mediaStream);
-      if (videoRef.current) {
-        videoRef.current.srcObject = mediaStream;
-      }
-      setHasError(false);
-    } catch (err: any) {
-      console.error('Error starting video stream:', err);
-      // Try fallback to standard front/environment resolution
-      try {
-        const mediaStream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'environment' },
-        });
-        setStream(mediaStream);
-        if (videoRef.current) {
-          videoRef.current.srcObject = mediaStream;
-        }
-        setHasError(false);
-      } catch (fallbackErr: any) {
-        setHasError(true);
-        setErrorMsg('No se pudo acceder a la cámara. Por favor suba un archivo o revise los permisos de su navegador.');
-      }
-    }
-  };
-
+  // Load list of cameras and initialize
   useEffect(() => {
+    let active = true;
+    const getCameras = async () => {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const videoDevices = devices.filter((device) => device.kind === 'videoinput');
+        if (active) {
+          setCameras(videoDevices);
+
+          if (videoDevices.length > 0) {
+            // Prefer rear camera if available
+            const environmentCamera = videoDevices.find(
+              (d) => d.label.toLowerCase().includes('back') || d.label.toLowerCase().includes('environment')
+            );
+            setActiveCameraId(environmentCamera?.deviceId || videoDevices[0].deviceId);
+          }
+        }
+      } catch (err) {
+        console.error('Error listing cameras:', err);
+      }
+    };
+
     getCameras();
+
     return () => {
-      if (stream) {
-        stream.getTracks().forEach((track) => track.stop());
+      active = false;
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
       }
     };
   }, []);
 
+  // Handle active camera streaming
   useEffect(() => {
+    let active = true;
+
+    const startStream = async (deviceId: string) => {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
+      }
+
+      try {
+        const constraints: MediaStreamConstraints = {
+          video: deviceId
+            ? { deviceId: { exact: deviceId }, width: { ideal: 1920 }, height: { ideal: 1080 } }
+            : { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
+        };
+
+        const mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+        if (active) {
+          streamRef.current = mediaStream;
+          if (videoRef.current) {
+            videoRef.current.srcObject = mediaStream;
+          }
+          setHasError(false);
+        } else {
+          mediaStream.getTracks().forEach((track) => track.stop());
+        }
+      } catch (err) {
+        console.error('Error starting video stream:', err);
+        // Try fallback to standard front/environment resolution
+        try {
+          const mediaStream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: 'environment' },
+          });
+          if (active) {
+            streamRef.current = mediaStream;
+            if (videoRef.current) {
+              videoRef.current.srcObject = mediaStream;
+            }
+            setHasError(false);
+          } else {
+            mediaStream.getTracks().forEach((track) => track.stop());
+          }
+        } catch {
+          if (active) {
+            setHasError(true);
+            setErrorMsg('No se pudo acceder a la cámara. Por favor suba un archivo o revise los permisos de su navegador.');
+          }
+        }
+      }
+    };
+
     if (activeCameraId) {
       startStream(activeCameraId);
     }
+
+    return () => {
+      active = false;
+    };
   }, [activeCameraId]);
 
   // Flip Front/Back Camera
