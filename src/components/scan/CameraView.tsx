@@ -1,252 +1,371 @@
-import React, { useRef, useState, useEffect } from 'react';
-import { RefreshCw, Upload, X } from 'lucide-react';
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
 
+import React, { useState, useEffect, useRef } from 'react';
+import { Camera, RefreshCw, Upload, Image as ImageIcon, ArrowLeft, Check, AlertTriangle, Play } from 'lucide-react';
+import { createDefaultAdjustments, createDefaultAdjustments as getCleanAdjustments } from '../../services/documentStore';
+import { ScannedPage } from '../../types';
 
-interface CameraScannerProps {
-  onCapture: (imageBase64: string) => void;
-  onCancel: () => void;
+interface CameraViewProps {
+  onBack: () => void;
+  onPagesCaptured: (capturedPages: ScannedPage[]) => void;
 }
 
-export const CameraScanner: React.FC<CameraScannerProps> = ({ onCapture, onCancel }) => {
+// Mocks de páginas/documentos reales en alta resolución que el usuario puede elegir si no tiene cámara física
+const SAMPLE_MOCKS = [
+  {
+    name: 'Boleta de Compras',
+    url: 'https://images.unsplash.com/photo-1554415707-6e8cfc93fe23?auto=format&fit=crop&q=80&w=600&h=800',
+  },
+  {
+    name: 'Contrato Comercial',
+    url: 'https://images.unsplash.com/photo-1450133064473-71024230f91b?auto=format&fit=crop&q=80&w=600&h=800',
+  },
+  {
+    name: 'Página de Libro Antiguo',
+    url: 'https://images.unsplash.com/photo-1544947950-fa07a98d237f?auto=format&fit=crop&q=80&w=600&h=800',
+  },
+];
+
+export default function CameraView({ onBack, onPagesCaptured }: CameraViewProps) {
+  const [stream, setStream] = useState<MediaStream | null>(null);
+  const [cameraActive, setCameraActive] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [sessionPages, setSessionPages] = useState<ScannedPage[]>([]);
+  const [isCapturing, setIsCapturing] = useState(false);
+
   const videoRef = useRef<HTMLVideoElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
-  const [activeCameraId, setActiveCameraId] = useState<string>('');
-  const [hasError, setHasError] = useState(false);
-  const [errorMsg, setErrorMsg] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Load list of cameras and initialize
-  useEffect(() => {
-    let active = true;
-    const getCameras = async () => {
-      try {
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        const videoDevices = devices.filter((device) => device.kind === 'videoinput');
-        if (active) {
-          setCameras(videoDevices);
-
-          if (videoDevices.length > 0) {
-            // Prefer rear camera if available
-            const environmentCamera = videoDevices.find(
-              (d) => d.label.toLowerCase().includes('back') || d.label.toLowerCase().includes('environment')
-            );
-            setActiveCameraId(environmentCamera?.deviceId || videoDevices[0].deviceId);
-          }
-        }
-      } catch (err) {
-        console.error('Error listing cameras:', err);
+  // Intentar iniciar la cámara
+  const startCamera = async () => {
+    setCameraError(null);
+    try {
+      if (stream) {
+        stream.getTracks().forEach((track) => track.stop());
       }
-    };
 
-    getCameras();
+      const mediaStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false,
+      });
 
+      setStream(mediaStream);
+      if (videoRef.current) {
+        videoRef.current.srcObject = mediaStream;
+      }
+      setCameraActive(true);
+    } catch (err: any) {
+      console.warn('Cámara no accesible, usando selector de archivos.', err);
+      setCameraError(
+        'No se pudo acceder a la cámara física (común en entornos iframe o sin permisos). ¡No te preocupes! Puedes subir fotos o usar nuestros documentos de prueba abajo.'
+      );
+      setCameraActive(false);
+    }
+  };
+
+  useEffect(() => {
+    startCamera();
     return () => {
-      active = false;
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((track) => track.stop());
-        streamRef.current = null;
+      if (stream) {
+        stream.getTracks().forEach((track) => track.stop());
       }
     };
   }, []);
 
-  // Handle active camera streaming
-  useEffect(() => {
-    let active = true;
+  // Función de Captura de Foto
+  const capturePhoto = () => {
+    if (!videoRef.current || !stream) return;
 
-    const startStream = async (deviceId: string) => {
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((track) => track.stop());
-        streamRef.current = null;
-      }
-
-      try {
-        const constraints: MediaStreamConstraints = {
-          video: deviceId
-            ? { deviceId: { exact: deviceId }, width: { ideal: 1920 }, height: { ideal: 1080 } }
-            : { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
-        };
-
-        const mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
-        if (active) {
-          streamRef.current = mediaStream;
-          if (videoRef.current) {
-            videoRef.current.srcObject = mediaStream;
-          }
-          setHasError(false);
-        } else {
-          mediaStream.getTracks().forEach((track) => track.stop());
-        }
-      } catch (err) {
-        console.error('Error starting video stream:', err);
-        // Try fallback to standard front/environment resolution
-        try {
-          const mediaStream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: 'environment' },
-          });
-          if (active) {
-            streamRef.current = mediaStream;
-            if (videoRef.current) {
-              videoRef.current.srcObject = mediaStream;
-            }
-            setHasError(false);
-          } else {
-            mediaStream.getTracks().forEach((track) => track.stop());
-          }
-        } catch {
-          if (active) {
-            setHasError(true);
-            setErrorMsg('No se pudo acceder a la cámara. Por favor suba un archivo o revise los permisos de su navegador.');
-          }
-        }
-      }
-    };
-
-    if (activeCameraId) {
-      startStream(activeCameraId);
-    }
-
-    return () => {
-      active = false;
-    };
-  }, [activeCameraId]);
-
-  // Flip Front/Back Camera
-  const toggleCamera = () => {
-    if (cameras.length < 2) return;
-    const currentIndex = cameras.findIndex((c) => c.deviceId === activeCameraId);
-    const nextIndex = (currentIndex + 1) % cameras.length;
-    setActiveCameraId(cameras[nextIndex].deviceId);
-  };
-
-  // Capture image frame
-  const takeSnapshot = () => {
-    if (!videoRef.current) return;
+    setIsCapturing(true);
+    
+    // Crear un canvas para capturar el frame del video
+    const canvas = document.createElement('canvas');
     const video = videoRef.current;
     
-    // Create offscreen canvas with same dimensions as video source
-    const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth || 1280;
-    canvas.height = video.videoHeight || 720;
+    // Conservar proporciones nativas del video
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
     
     const ctx = canvas.getContext('2d');
     if (ctx) {
-      // Draw frame
+      // Efecto espejo si la cámara es frontal (facetime, etc.), pero por defecto facingMode environment no lo necesita
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
-      onCapture(dataUrl);
+      const base64 = canvas.toDataURL('image/jpeg', 0.9);
+      
+      const newPage: ScannedPage = {
+        id: `page_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        originalImage: base64,
+        processedImage: base64,
+        adjustments: createDefaultAdjustments(),
+      };
+      
+      setSessionPages((prev) => [...prev, newPage]);
+    }
+
+    // Animación de flash rápido
+    setTimeout(() => {
+      setIsCapturing(false);
+    }, 200);
+  };
+
+  // Carga de archivo desde galeria
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    Array.from(files).forEach((file: any) => {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        if (event.target?.result) {
+          const base64 = event.target.result as string;
+          const newPage: ScannedPage = {
+            id: `page_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+            originalImage: base64,
+            processedImage: base64,
+            adjustments: createDefaultAdjustments(),
+          };
+          setSessionPages((prev) => [...prev, newPage]);
+        }
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
+  // Importar documento de prueba rápido
+  const handleImportSample = async (url: string) => {
+    try {
+      const response = await fetch(url);
+      const blob = await response.blob();
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        if (reader.result) {
+          const base64 = reader.result as string;
+          const newPage: ScannedPage = {
+            id: `page_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+            originalImage: base64,
+            processedImage: base64,
+            adjustments: createDefaultAdjustments(),
+          };
+          setSessionPages((prev) => [...prev, newPage]);
+        }
+      };
+      reader.readAsDataURL(blob);
+    } catch (e) {
+      // Si falla por CORS de Unsplash en el sandbox, cargamos una versión Canvas hecha al vuelo
+      const canvas = document.createElement('canvas');
+      canvas.width = 600;
+      canvas.height = 800;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.fillStyle = '#f5eedc';
+        ctx.fillRect(0, 0, 600, 800);
+        ctx.fillStyle = '#111';
+        ctx.font = 'bold 24px monospace';
+        ctx.fillText('CONTRATO DE SERVICIOS', 50, 80);
+        ctx.font = '14px monospace';
+        ctx.fillText('1. Objeto del acuerdo...', 50, 140);
+        ctx.fillText('El prestador se compromete a realizar un', 50, 170);
+        ctx.fillText('rediseño completo de la interfaz móvil.', 50, 200);
+        ctx.fillText('2. Plazo de entrega: 15 de Julio', 50, 250);
+        ctx.strokeRect(20, 20, 560, 760);
+        const base64 = canvas.toDataURL('image/jpeg');
+        const newPage: ScannedPage = {
+          id: `page_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          originalImage: base64,
+          processedImage: base64,
+          adjustments: createDefaultAdjustments(),
+        };
+        setSessionPages((prev) => [...prev, newPage]);
+      }
     }
   };
 
-  // Handle uploaded files
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      if (event.target?.result) {
-        onCapture(event.target.result as string);
-      }
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const triggerUploadClick = () => {
-    fileInputRef.current?.click();
+  // Confirmar y avanzar
+  const handleFinishScan = () => {
+    if (sessionPages.length > 0) {
+      onPagesCaptured(sessionPages);
+    }
   };
 
   return (
-    <div className="camera-viewport flex-1 flex flex-col relative bg-slate-950 overflow-hidden">
-      {/* Video Viewport */}
-      {!hasError ? (
-        <div className="relative flex-1 w-full h-full flex items-center justify-center bg-black">
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted
-            className="w-full h-full object-cover max-h-[80vh] md:max-h-full"
-          />
-          
-          {/* Scanning Box Guide Overlay */}
-          <div className="absolute inset-0 border-[40px] border-slate-950/70 pointer-events-none flex items-center justify-center">
-            <div className="w-[85vw] max-w-[420px] h-[55vh] max-h-[600px] border-2 border-dashed border-cyan-400 rounded-lg relative shadow-[0_0_20px_rgba(34,211,238,0.2)]">
-              {/* Corner brackets representation */}
-              <div className="absolute -top-1.5 -left-1.5 w-6 h-6 border-t-4 border-l-4 border-cyan-400 rounded-tl-md"></div>
-              <div className="absolute -top-1.5 -right-1.5 w-6 h-6 border-t-4 border-r-4 border-cyan-400 rounded-tr-md"></div>
-              <div className="absolute -bottom-1.5 -left-1.5 w-6 h-6 border-b-4 border-l-4 border-cyan-400 rounded-bl-md"></div>
-              <div className="absolute -bottom-1.5 -right-1.5 w-6 h-6 border-b-4 border-r-4 border-cyan-400 rounded-br-md"></div>
-              <p className="absolute bottom-4 left-0 right-0 text-center text-xs text-cyan-200 font-medium tracking-wide uppercase bg-slate-950/60 py-1.5 px-3 rounded-full mx-auto w-fit backdrop-blur-md">
-                Alinea el documento aquí
-              </p>
+    <div className="flex flex-col h-full bg-[#0F0F0F] text-white">
+      {/* Header */}
+      <div className="flex items-center justify-between p-4 border-b border-[#2C2C2E] bg-[#1C1C1E] z-10">
+        <button
+          id="btn-scan-back"
+          onClick={onBack}
+          className="p-2 -ml-2 text-gray-400 hover:text-white hover:bg-[#2C2C2E] rounded-xl transition-colors"
+        >
+          <ArrowLeft size={20} />
+        </button>
+        <h3 className="text-sm font-semibold tracking-wide text-center uppercase">
+          Escanear Páginas ({sessionPages.length})
+        </h3>
+        <button
+          id="btn-finish-scan"
+          disabled={sessionPages.length === 0}
+          onClick={handleFinishScan}
+          className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+            sessionPages.length > 0
+              ? 'bg-[#2979FF] text-white shadow-md shadow-[#2979FF]/25 active:scale-95'
+              : 'bg-gray-800 text-gray-500 cursor-not-allowed'
+          }`}
+        >
+          Siguiente
+          <Check size={14} />
+        </button>
+      </div>
+
+      {/* Visor de Cámara o Fallback */}
+      <div className="flex-1 relative flex flex-col items-center justify-center overflow-hidden">
+        {/* Flash Animation Overlay */}
+        {isCapturing && <div className="absolute inset-0 bg-white z-50 animate-flash"></div>}
+
+        {cameraActive ? (
+          <div className="relative w-full h-full max-w-lg aspect-[3/4] bg-black flex items-center justify-center">
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              className="w-full h-full object-cover"
+            />
+            {/* Guía de encuadre de documento */}
+            <div className="absolute inset-8 border-[2px] border-dashed border-white/60 rounded-xl pointer-events-none flex items-center justify-center">
+              <div className="w-16 h-16 border-t-2 border-l-2 border-[#2979FF] absolute top-0 left-0 rounded-tl-lg"></div>
+              <div className="w-16 h-16 border-t-2 border-r-2 border-[#2979FF] absolute top-0 right-0 rounded-tr-lg"></div>
+              <div className="w-16 h-16 border-b-2 border-l-2 border-[#2979FF] absolute bottom-0 left-0 rounded-bl-lg"></div>
+              <div className="w-16 h-16 border-b-2 border-r-2 border-[#2979FF] absolute bottom-0 right-0 rounded-br-lg"></div>
+              <span className="text-[11px] text-white/70 bg-black/50 px-2.5 py-1 rounded-full backdrop-blur-sm">
+                Encuadra el documento aquí
+              </span>
             </div>
           </div>
-        </div>
-      ) : (
-        <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-slate-900 border-2 border-dashed border-slate-700 m-4 rounded-xl">
-          <Upload className="w-16 h-16 text-slate-500 mb-4 animate-bounce" />
-          <h3 className="text-xl font-semibold text-slate-200 mb-2">Escaneo de archivos local</h3>
-          <p className="text-slate-400 max-w-sm mb-6 text-sm">{errorMsg}</p>
-          <button
-            onClick={triggerUploadClick}
-            className="btn btn-primary px-6 py-3 flex items-center justify-center gap-2"
-          >
-            <Upload className="w-5 h-5" />
-            Seleccionar documento de la galería
-          </button>
-        </div>
-      )}
+        ) : (
+          <div className="flex flex-col items-center max-w-md p-6 text-center">
+            <div className="w-16 h-16 bg-[#2C2C2E] border border-white/10 rounded-2xl flex items-center justify-center text-amber-500 mb-4">
+              <AlertTriangle size={32} />
+            </div>
+            <h4 className="text-base font-semibold mb-2">Cámara física no disponible</h4>
+            <p className="text-xs text-gray-400 mb-6 px-4">
+              {cameraError || 'Activa la cámara o selecciona archivos locales para simular el escaneo.'}
+            </p>
 
-      {/* Invisible inputs */}
+            {/* Acciones de Fallback */}
+            <div className="flex flex-col gap-3 w-full px-6">
+              <button
+                id="upload-file-btn"
+                onClick={() => fileInputRef.current?.click()}
+                className="flex items-center justify-center gap-2.5 py-3 px-5 bg-[#1C1C1E] hover:bg-[#2C2C2E] border border-[#3C3C3E] rounded-xl text-sm font-semibold transition-colors"
+              >
+                <Upload size={16} className="text-[#2979FF]" />
+                Subir foto desde galería
+              </button>
+
+              <div className="flex items-center my-2">
+                <div className="h-[1px] bg-white/10 flex-grow"></div>
+                <span className="text-[10px] text-gray-500 uppercase px-3 tracking-wider">o usa un demo</span>
+                <div className="h-[1px] bg-white/10 flex-grow"></div>
+              </div>
+
+              {/* Botones de demostración */}
+              <div className="grid grid-cols-3 gap-2">
+                {SAMPLE_MOCKS.map((sample, idx) => (
+                  <button
+                    id={`sample-mock-btn-${idx}`}
+                    key={idx}
+                    onClick={() => handleImportSample(sample.url)}
+                    className="p-2 bg-[#1C1C1E] hover:bg-[#2C2C2E] border border-[#3C3C3E] rounded-xl text-center transition-all flex flex-col items-center gap-1.5"
+                  >
+                    <ImageIcon size={14} className="text-gray-400" />
+                    <span className="text-[9px] font-medium leading-tight text-gray-300 break-words line-clamp-2">
+                      {sample.name}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Input de archivo oculto */}
       <input
-        type="file"
         ref={fileInputRef}
-        onChange={handleFileUpload}
+        type="file"
         accept="image/*"
+        multiple
+        onChange={handleFileChange}
         className="hidden"
       />
 
-      {/* Control bar */}
-      <div className="camera-controls w-full bg-slate-900/90 backdrop-blur-md border-t border-slate-800 p-6 flex items-center justify-between z-10">
-        <button
-          onClick={onCancel}
-          className="btn btn-secondary p-3 rounded-full flex items-center justify-center text-slate-400 hover:text-white"
-          title="Cancelar"
-        >
-          <X className="w-6 h-6" />
-        </button>
-
-        {!hasError && (
-          <button
-            onClick={takeSnapshot}
-            className="w-16 h-16 rounded-full bg-white border-4 border-slate-400 shadow-[0_0_15px_rgba(255,255,255,0.4)] flex items-center justify-center transform active:scale-95 transition-all"
-            title="Capturar foto"
-          >
-            <div className="w-8 h-8 rounded-full bg-slate-950"></div>
-          </button>
+      {/* Controles de cámara inferiores */}
+      <div className="bg-[#1C1C1E] border-t border-[#2C2C2E] p-4 flex flex-col gap-3">
+        {/* Tira horizontal de páginas ya escaneadas */}
+        {sessionPages.length > 0 && (
+          <div className="flex items-center gap-2 overflow-x-auto py-1">
+            <span className="text-[10px] uppercase tracking-wider text-gray-500 shrink-0">
+              Capturado:
+            </span>
+            <div className="flex gap-2">
+              {sessionPages.map((page, idx) => (
+                <div key={page.id} className="relative w-12 h-16 bg-black rounded-md overflow-hidden border border-[#2C2C2E]">
+                  <img
+                    src={page.processedImage}
+                    className="w-full h-full object-cover"
+                    alt={`página ${idx + 1}`}
+                    referrerPolicy="no-referrer"
+                  />
+                  <div className="absolute top-0 right-0 bg-[#2979FF] text-white text-[9px] w-4 h-4 flex items-center justify-center font-bold rounded-bl-md">
+                    {idx + 1}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         )}
 
-        <div className="flex gap-3">
-          {!hasError && cameras.length > 1 && (
-            <button
-              onClick={toggleCamera}
-              className="btn btn-secondary p-3 rounded-full flex items-center justify-center text-slate-300 hover:text-white"
-              title="Cambiar Cámara"
-            >
-              <RefreshCw className="w-6 h-6" />
-            </button>
-          )}
-
+        {/* Botones de Acción */}
+        <div className="flex items-center justify-between px-6">
+          {/* Botón Galería rápido */}
           <button
-            onClick={triggerUploadClick}
-            className="btn btn-secondary p-3 rounded-full flex items-center justify-center text-slate-300 hover:text-white"
-            title="Subir archivo"
+            id="quick-gallery-btn"
+            onClick={() => fileInputRef.current?.click()}
+            className="p-3 text-gray-400 hover:text-white hover:bg-[#2C2C2E] rounded-xl transition-colors"
+            title="Importar imagen"
           >
-            <Upload className="w-6 h-6" />
+            <Upload size={20} />
+          </button>
+
+          {/* Botón Disparador Principal */}
+          <button
+            id="shutter-capture-btn"
+            disabled={!cameraActive}
+            onClick={capturePhoto}
+            className={`w-16 h-16 rounded-full flex items-center justify-center transition-all ${
+              cameraActive
+                ? 'bg-white p-1 hover:scale-105 active:scale-95'
+                : 'bg-gray-800 p-1 cursor-not-allowed opacity-50'
+            }`}
+          >
+            <div className={`w-full h-full rounded-full border-2 ${cameraActive ? 'border-black bg-white' : 'border-gray-900 bg-gray-800'} flex items-center justify-center`}>
+              <div className="w-4 h-4 rounded-full bg-[#2979FF]"></div>
+            </div>
+          </button>
+
+          {/* Reintentar iniciar cámara */}
+          <button
+            id="refresh-camera-btn"
+            onClick={startCamera}
+            className="p-3 text-gray-400 hover:text-white hover:bg-[#2C2C2E] rounded-xl transition-colors"
+            title="Recargar cámara"
+          >
+            <RefreshCw size={20} />
           </button>
         </div>
       </div>
     </div>
   );
-};
+}

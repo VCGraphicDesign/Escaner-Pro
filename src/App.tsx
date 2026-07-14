@@ -1,179 +1,116 @@
 /**
- * Componente principal de la aplicación
- * Gestiona el enrutamiento y el estado global
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState } from 'react';
-import type { DocumentProject, ScannedPage } from './services/documentStore';
-import { saveDocumentProject } from './services/documentStore';
-import { processPageImage } from './services/imageProcessor';
-import { HomePage } from './pages/HomePage';
-import { ScanPage } from './pages/ScanPage';
-import { CleanPage } from './pages/CleanPage';
-import { EditPage } from './pages/EditPage';
-import { logger } from './utils/logger';
+import React, { useState } from 'react';
+import { DocumentItem, ScannedPage } from './types';
+import HomePage from './pages/HomePage';
+import CameraView from './components/scan/CameraView';
+import CleanPage from './pages/CleanPage';
+import EditPage from './pages/EditPage';
+import { saveDocument } from './services/documentStore';
 
-type Screen = 'home' | 'scan' | 'crop' | 'edit';
+type ViewState = 'home' | 'scan' | 'clean' | 'edit';
 
-function App() {
-  const [screen, setScreen] = useState<Screen>('home');
-  const [activeProject, setActiveProject] = useState<DocumentProject | null>(null);
-  const [activePageIndex, setActivePageIndex] = useState<number>(0);
-  const [tempImageSrc, setTempImageSrc] = useState<string>('');
-  const [isNewScanForExistingDoc, setIsNewScanForExistingDoc] = useState<boolean>(false);
+export default function App() {
+  const [view, setView] = useState<ViewState>('home');
+  const [selectedDocument, setSelectedDocument] = useState<DocumentItem | null>(null);
+  const [capturedPages, setCapturedPages] = useState<ScannedPage[]>([]);
 
-  // Return to Home list dashboard
-  const handleGoHome = async () => {
-    if (activeProject) {
-      await saveDocumentProject(activeProject);
-    }
-    setActiveProject(null);
-    setScreen('home');
+  // 1. Iniciar un nuevo escaneo desde Home
+  const handleStartNewScan = () => {
+    setSelectedDocument(null);
+    setCapturedPages([]);
+    setView('scan');
   };
 
-  // Create a brand new project and open camera
-  const handleStartNewDocument = () => {
-    const newDoc: DocumentProject = {
-      id: `doc-${Date.now()}`,
-      name: `Escaneo_${new Date().toLocaleDateString('es-ES').replace(/\//g, '_')}`,
-      createdAt: Date.now(),
-      pages: [],
-    };
-    setActiveProject(newDoc);
-    setIsNewScanForExistingDoc(false);
-    setScreen('scan');
+  // 2. Al capturar páginas en la cámara, pasar a limpieza
+  const handlePagesCaptured = (pages: ScannedPage[]) => {
+    setCapturedPages(pages);
+    setView('clean');
   };
 
-  // Open an existing project
-  const handleOpenDocument = (proj: DocumentProject) => {
-    setActiveProject(proj);
-    setActivePageIndex(0);
-    setScreen('edit');
-  };
+  // 3. Al terminar de procesar y filtrar en CleanPage
+  const handleFinishCleaning = (cleanedPages: ScannedPage[]) => {
+    if (selectedDocument) {
+      // Caso 1: Estábamos editando un documento existente y re-procesamos las páginas
+      const updatedDoc: DocumentItem = {
+        ...selectedDocument,
+        pages: cleanedPages,
+      };
+      saveDocument(updatedDoc);
+      setSelectedDocument(updatedDoc);
+      setView('edit');
+    } else {
+      // Caso 2: Es un documento completamente nuevo
+      const documentCount = localStorage.getItem('escaner_pro_documents_count') || '1';
+      const count = parseInt(documentCount, 10);
+      localStorage.setItem('escaner_pro_documents_count', (count + 1).toString());
 
-  // Trigger camera scanner for current active document
-  const handleAddPage = () => {
-    setIsNewScanForExistingDoc(true);
-    setScreen('scan');
-  };
-
-  // Snapshot captured callback
-  const handleImageCaptured = (base64: string) => {
-    setTempImageSrc(base64);
-    setScreen('crop');
-  };
-
-  // Vertex crop aligned confirmed callback
-  const handleCropComplete = async (cropPoints: { x: number; y: number }[]) => {
-    if (!activeProject) return;
-
-    try {
-      const newPageId = `page-${Date.now()}`;
-      
-      const newPage: ScannedPage = {
-        id: newPageId,
-        originalImage: tempImageSrc,
-        processedImage: '',
-        rotate: 0,
-        cropPoints,
-        brightness: 0,
-        contrast: 0,
-        binarize: true,
-        binarizeThreshold: 10,
-        shadowRemoval: true,
-        grayscale: false,
-        texts: [],
+      const newDoc: DocumentItem = {
+        id: `doc_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        name: `Escaneo Documento ${count}`,
+        createdAt: new Date().toISOString(),
+        pages: cleanedPages,
       };
 
-      const processed = await processPageImage(
-        newPage.originalImage,
-        newPage.cropPoints,
-        newPage.rotate,
-        newPage.brightness,
-        newPage.contrast,
-        newPage.binarize,
-        newPage.shadowRemoval,
-        newPage.grayscale,
-        newPage.binarizeThreshold
-      );
-
-      newPage.processedImage = processed;
-
-      let updatedPages = [...activeProject.pages];
-      if (isNewScanForExistingDoc) {
-        updatedPages.push(newPage);
-      } else {
-        updatedPages = [newPage];
-      }
-
-      const updatedProj: DocumentProject = {
-        ...activeProject,
-        pages: updatedPages,
-      };
-
-      setActiveProject(updatedProj);
-      await saveDocumentProject(updatedProj);
-      setActivePageIndex(updatedPages.length - 1);
-      setScreen('edit');
-    } catch (err) {
-      logger.error('Error creando página procesada', err);
-    } finally {
-      setTempImageSrc('');
+      saveDocument(newDoc);
+      setSelectedDocument(newDoc);
+      setView('edit');
     }
   };
 
-  // Toggle Edit screen again
-  const handleCropAgain = () => {
-    if (!activeProject) return;
-    const page = activeProject.pages[activePageIndex];
-    setTempImageSrc(page.originalImage);
-    const updatedPages = activeProject.pages.filter((_, idx) => idx !== activePageIndex);
-    setActiveProject({ ...activeProject, pages: updatedPages });
-    setIsNewScanForExistingDoc(true);
-    setScreen('crop');
+  // 4. Seleccionar un documento existente para editar desde Home
+  const handleEditDocument = (doc: DocumentItem) => {
+    setSelectedDocument(doc);
+    setView('edit');
   };
 
-  const handleUpdateProject = (project: DocumentProject) => {
-    setActiveProject(project);
-    saveDocumentProject(project);
+  // 5. Ir desde el Editor de vuelta a la Limpieza para re-ajustar
+  const handleNavigateToCleanFromEdit = (pagesToClean: ScannedPage[]) => {
+    setCapturedPages(pagesToClean);
+    setView('clean');
   };
 
   return (
-    <div className="editor-container animate-fade-in">
-      {screen === 'home' && (
-        <HomePage
-          onStartNewDocument={handleStartNewDocument}
-          onOpenDocument={handleOpenDocument}
-        />
-      )}
+    <div className="w-full h-screen bg-[#0F0F0F] text-white flex justify-center items-center">
+      {/* Contenedor tipo pantalla de teléfono inteligente para una sensación móvil premium */}
+      <div className="w-full h-full max-w-md bg-[#0F0F0F] flex flex-col relative border border-[#1C1C1E] shadow-2xl overflow-hidden">
+        
+        {view === 'home' && (
+          <HomePage
+            onStartNewScan={handleStartNewScan}
+            onEditDocument={handleEditDocument}
+          />
+        )}
 
-      {screen === 'scan' && (
-        <ScanPage
-          onCapture={handleImageCaptured}
-          onCancel={handleGoHome}
-        />
-      )}
+        {view === 'scan' && (
+          <CameraView
+            onBack={() => setView('home')}
+            onPagesCaptured={handlePagesCaptured}
+          />
+        )}
 
-      {screen === 'crop' && (
-        <CleanPage
-          imageSrc={tempImageSrc}
-          onCropComplete={handleCropComplete}
-          onCancel={handleGoHome}
-        />
-      )}
+        {view === 'clean' && (
+          <CleanPage
+            capturedPages={capturedPages}
+            onBack={() => setView(selectedDocument ? 'edit' : 'scan')}
+            onFinishCleaning={handleFinishCleaning}
+          />
+        )}
 
-      {screen === 'edit' && activeProject && (
-        <EditPage
-          project={activeProject}
-          activePageIndex={activePageIndex}
-          onGoHome={handleGoHome}
-          onUpdateProject={handleUpdateProject}
-          onCropAgain={handleCropAgain}
-          onAddPage={handleAddPage}
-        />
-      )}
+        {view === 'edit' && selectedDocument && (
+          <EditPage
+            document={selectedDocument}
+            onBack={() => {
+              setSelectedDocument(null);
+              setView('home');
+            }}
+            onNavigateToClean={handleNavigateToCleanFromEdit}
+          />
+        )}
+      </div>
     </div>
   );
 }
-
-export default App;

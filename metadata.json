@@ -1,0 +1,6 @@
+{
+  "name": "Escáner Pro",
+  "description": "Aplicación profesional de escaneo de documentos 100% offline con procesamiento de imágenes en tiempo real.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

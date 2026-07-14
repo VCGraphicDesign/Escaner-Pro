@@ -1,86 +1,54 @@
 /**
- * Servicio para generar PDFs usando jspdf
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
  */
 
-import jsPDF from 'jspdf';
-
-export interface PDFOptions {
-  format: 'a4' | 'letter';
-  orientation: 'portrait' | 'landscape';
-  quality: number;
-}
+import { jsPDF } from 'jspdf';
+import { ScannedPage } from '../types';
 
 /**
- * Genera un PDF a partir de imágenes base64
+ * Genera y descarga un archivo PDF de alta calidad a partir de las imágenes procesadas.
+ * Funciona offline en la web y móvil.
  */
 export async function generatePDF(
-  images: string[],
-  _filename: string,
-  options: PDFOptions = { format: 'a4', orientation: 'portrait', quality: 0.9 }
-): Promise<Blob> {
+  documentName: string,
+  pages: ScannedPage[]
+): Promise<void> {
+  if (pages.length === 0) return;
+
+  // Formato A4 estándar en mm: 210 x 297
   const pdf = new jsPDF({
-    orientation: options.orientation,
+    orientation: 'portrait',
     unit: 'mm',
-    format: options.format,
+    format: 'a4',
   });
 
-  const pageWidth = pdf.internal.pageSize.getWidth();
-  const pageHeight = pdf.internal.pageSize.getHeight();
+  const targetWidth = 210;
+  const targetHeight = 297;
 
-  for (let i = 0; i < images.length; i++) {
+  for (let i = 0; i < pages.length; i++) {
+    const page = pages[i];
+    const imageBase64 = page.processedImage;
+
+    // Si no es la primera página, añadir una nueva página al PDF
     if (i > 0) {
-      pdf.addPage();
+      pdf.addPage('a4', 'portrait');
     }
 
-    const img = await loadImage(images[i]);
-    
-    // Calcular dimensiones para mantener aspect ratio
-    const imgRatio = img.width / img.height;
-    const pageRatio = pageWidth / pageHeight;
-
-    let finalWidth, finalHeight;
-
-    if (imgRatio > pageRatio) {
-      finalWidth = pageWidth;
-      finalHeight = pageWidth / imgRatio;
-    } else {
-      finalHeight = pageHeight;
-      finalWidth = pageHeight * imgRatio;
-    }
-
-    const x = (pageWidth - finalWidth) / 2;
-    const y = (pageHeight - finalHeight) / 2;
-
-    pdf.addImage(images[i], 'JPEG', x, y, finalWidth, finalHeight);
+    // Agregar la imagen ajustándose al tamaño de la página A4
+    pdf.addImage(
+      imageBase64,
+      'JPEG',
+      0,
+      0,
+      targetWidth,
+      targetHeight,
+      undefined,
+      'FAST'
+    );
   }
 
-  return pdf.output('blob');
-}
-
-/**
- * Carga una imagen base64 y retorna sus dimensiones
- */
-function loadImage(base64: string): Promise<{ width: number; height: number }> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => {
-      resolve({ width: img.naturalWidth, height: img.naturalHeight });
-    };
-    img.onerror = reject;
-    img.src = base64;
-  });
-}
-
-/**
- * Descarga un PDF en el navegador
- */
-export function downloadPDF(blob: Blob, filename: string): void {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+  // Descargar el archivo PDF directamente en el navegador
+  const finalName = documentName.endsWith('.pdf') ? documentName : `${documentName}.pdf`;
+  pdf.save(finalName);
 }
