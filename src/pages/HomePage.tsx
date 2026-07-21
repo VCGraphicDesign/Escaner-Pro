@@ -62,7 +62,7 @@ export default function HomePage({ onStartNewScan, onEditDocument }: HomePagePro
   );
 
   return (
-    <div className="flex flex-col h-full bg-[#0F0F0F] text-white overflow-hidden relative">
+    <div className="flex flex-col h-full bg-[#09364D] text-white overflow-hidden relative">
       {/* Header */}
       <header className="p-5 bg-[#1C1C1E] border-b border-[#2C2C2E] flex items-center justify-between z-10 shrink-0">
         <div className="flex items-center gap-2.5">

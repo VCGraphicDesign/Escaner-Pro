@@ -191,7 +191,7 @@ export default function CameraView({ onBack, onPagesCaptured }: CameraViewProps)
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#0F0F0F] text-white">
+    <div className="flex flex-col h-full bg-[#09364D] text-white">
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b border-[#2C2C2E] bg-[#1C1C1E] z-10">
         <button

@@ -334,7 +334,7 @@ export default function EditPage({ document: initialDoc, onBack, onNavigateToCle
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#0F0F0F] text-white overflow-hidden">
+    <div className="flex flex-col h-full bg-[#09364D] text-white overflow-hidden">
       {/* Header */}
       <header className="px-4 py-4 bg-[#1C1C1E] border-b border-[#2C2C2E] flex items-center justify-between z-10 shrink-0">
         <div className="flex items-center gap-1.5">

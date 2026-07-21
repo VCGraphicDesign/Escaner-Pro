@@ -148,14 +148,14 @@ export default function CleanPage({ capturedPages, onBack, onFinishCleaning }: C
 
   if (!currentPage) {
     return (
-      <div className="flex items-center justify-center h-full bg-[#0F0F0F] text-white">
+      <div className="flex items-center justify-center h-full bg-[#09364D] text-white">
         <RefreshCw className="animate-spin text-[#2979FF]" />
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col h-full bg-[#0F0F0F] text-white overflow-hidden">
+    <div className="flex flex-col h-full bg-[#09364D] text-white overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b border-[#2C2C2E] bg-[#1C1C1E] z-10">
         <button

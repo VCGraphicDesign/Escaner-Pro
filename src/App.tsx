@@ -74,9 +74,9 @@ export default function App() {
   };
 
   return (
-    <div className="w-full h-screen bg-[#0F0F0F] text-white flex justify-center items-center">
+    <div className="w-full h-screen bg-[#09364D] text-white flex justify-center items-center">
       {/* Contenedor tipo pantalla de teléfono inteligente para una sensación móvil premium */}
-      <div className="w-full h-full max-w-md bg-[#0F0F0F] flex flex-col relative border border-[#1C1C1E] shadow-2xl overflow-hidden">
+      <div className="w-full h-full max-w-md bg-[#09364D] flex flex-col relative border border-[#1C1C1E] shadow-2xl overflow-hidden">
         
         {view === 'home' && (
           <HomePage
