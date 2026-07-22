@@ -232,25 +232,27 @@ export function normalizeIllumination(canvas: HTMLCanvasElement) {
   // Para optimizar en JS, hacemos un escalado inverso extremo para aproximar la luz de fondo,
   // y luego restamos o normalizamos con la original.
   const tempCanvas = document.createElement('canvas');
-  tempCanvas.width = 40;
-  tempCanvas.height = 40;
+  const illumW = Math.max(60, Math.min(150, Math.floor(w / 10)));
+  const illumH = Math.round((illumW * h) / w);
+  tempCanvas.width = illumW;
+  tempCanvas.height = illumH;
   const tempCtx = tempCanvas.getContext('2d');
   if (!tempCtx) return;
 
   // Dibujamos la imagen pequeña (blur/promedio local implícito)
-  tempCtx.drawImage(canvas, 0, 0, 40, 40);
-  // Blur
-  tempCtx.globalAlpha = 0.5;
-  tempCtx.drawImage(tempCanvas, 1, 1);
-  tempCtx.drawImage(tempCanvas, -1, -1);
-  const illuminationData = tempCtx.getImageData(0, 0, 40, 40).data;
+  tempCtx.drawImage(canvas, 0, 0, illumW, illumH);
+  // Blur mejorado
+  tempCtx.filter = 'blur(3px)';
+  tempCtx.drawImage(tempCanvas, 0, 0);
+  tempCtx.filter = 'none';
+  const illuminationData = tempCtx.getImageData(0, 0, illumW, illumH).data;
 
   // Función de interpolación para obtener el brillo de fondo en cualquier (x, y)
   for (let y = 0; y < h; y++) {
-    const iy = Math.floor((y / h) * 40);
+    const iy = Math.min(illumH - 1, Math.floor((y / h) * illumH));
     for (let x = 0; x < w; x++) {
-      const ix = Math.floor((x / w) * 40);
-      const illIdx = (iy * 40 + ix) * 4;
+      const ix = Math.min(illumW - 1, Math.floor((x / w) * illumW));
+      const illIdx = (iy * illumW + ix) * 4;
 
       // Color de fondo aproximado
       const bgR = illuminationData[illIdx];
@@ -265,15 +267,15 @@ export function normalizeIllumination(canvas: HTMLCanvasElement) {
 
       // Normalizar: multiplicar el pixel original por la diferencia de brillo
       // Si el fondo es oscuro, lo aclaramos.
-      const targetLuminance = 230; // Valor ideal de papel blanco
-      const factorR = targetLuminance / Math.max(10, bgR);
-      const factorG = targetLuminance / Math.max(10, bgG);
-      const factorB = targetLuminance / Math.max(10, bgB);
+      const targetLuminance = 240; // Valor ideal de papel blanco
+      const factorR = targetLuminance / Math.max(50, bgR); // Mínimo más alto para evitar sobreexposición
+      const factorG = targetLuminance / Math.max(50, bgG);
+      const factorB = targetLuminance / Math.max(50, bgB);
 
-      // Mezclamos un 70% de la corrección para que sea natural
-      data[idx] = Math.min(255, Math.max(0, r * (1 + (factorR - 1) * 0.7)));
-      data[idx + 1] = Math.min(255, Math.max(0, g * (1 + (factorG - 1) * 0.7)));
-      data[idx + 2] = Math.min(255, Math.max(0, b * (1 + (factorB - 1) * 0.7)));
+      // Mezclamos un 50% de la corrección para que sea más natural y menos agresivo
+      data[idx] = Math.min(255, Math.max(0, r * (1 + (factorR - 1) * 0.5)));
+      data[idx + 1] = Math.min(255, Math.max(0, g * (1 + (factorG - 1) * 0.5)));
+      data[idx + 2] = Math.min(255, Math.max(0, b * (1 + (factorB - 1) * 0.5)));
     }
   }
 
@@ -517,8 +519,8 @@ export function removeWrinklesAndShadows(canvas: HTMLCanvasElement) {
 
   // 1. Crear mapa de iluminación creando una versión suavizada de baja frecuencia (Background Surface)
   const bgCanvas = document.createElement('canvas');
-  const bgW = 40;
-  const bgH = Math.round((40 * h) / w);
+  const bgW = Math.max(60, Math.min(150, Math.floor(w / 10))); // Resolución más alta para mejor precisión
+  const bgH = Math.round((bgW * h) / w);
   bgCanvas.width = bgW;
   bgCanvas.height = bgH;
   const bgCtx = bgCanvas.getContext('2d');
@@ -527,10 +529,9 @@ export function removeWrinklesAndShadows(canvas: HTMLCanvasElement) {
   // Dibujar a baja resolución con suavizado
   bgCtx.drawImage(canvas, 0, 0, bgW, bgH);
   // Aplicar paso de desenfoque adicional en el lienzo pequeñito para eliminar textura local del papel
-  bgCtx.globalAlpha = 0.5;
-  bgCtx.drawImage(bgCanvas, 1, 1);
-  bgCtx.drawImage(bgCanvas, -1, -1);
-  bgCtx.globalAlpha = 1.0;
+  bgCtx.filter = 'blur(2px)';
+  bgCtx.drawImage(bgCanvas, 0, 0);
+  bgCtx.filter = 'none';
 
   const bgData = bgCtx.getImageData(0, 0, bgW, bgH).data;
 
@@ -554,21 +555,21 @@ export function removeWrinklesAndShadows(canvas: HTMLCanvasElement) {
       const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
 
       // Umbral adaptativo: si el píxel está cerca o por encima de la luz del papel local
-      const thresholdOffset = 18; // Sensibilidad para distinguir tinta de sombra
+      const thresholdOffset = 35; // Aumentado para ser menos agresivo y preservar más detalles
       const paperThreshold = bgLuminance - thresholdOffset;
 
       if (luminance >= paperThreshold) {
-        // Es papel/fondo con sombra o arruga -> Blanquear completamente a blanco uniforme
-        data[idx] = 255;
-        data[idx + 1] = 255;
-        data[idx + 2] = 255;
+        // Es papel/fondo con sombra o arruga -> Aclarar suavemente en lugar de blanco puro
+        const blendFactor = Math.min(1, (luminance - paperThreshold) / 30); // Transición suave
+        data[idx] = Math.floor(r + (255 - r) * blendFactor * 0.8);
+        data[idx + 1] = Math.floor(g + (255 - g) * blendFactor * 0.8);
+        data[idx + 2] = Math.floor(b + (255 - b) * blendFactor * 0.8);
       } else {
-        // Es texto/tinta -> Conservar color oscuro y aumentar nitidez/contraste
-        const factor = Math.max(0, luminance / paperThreshold);
-        // Oscurecer texto para máxima legibilidad
-        const enhancedVal = Math.floor(factor * 0.85 * 255);
+        // Es texto/tinta -> Conservar color oscuro con ligero contraste
+        const factor = Math.max(0.7, luminance / paperThreshold);
+        const enhancedVal = Math.floor(factor * 0.95 * 255);
 
-        // Mantener tono original pero profundizado
+        // Mantener tono original pero con mejor contraste
         data[idx] = Math.min(r, enhancedVal);
         data[idx + 1] = Math.min(g, enhancedVal);
         data[idx + 2] = Math.min(b, enhancedVal);
