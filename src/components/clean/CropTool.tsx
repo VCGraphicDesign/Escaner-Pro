@@ -99,14 +99,10 @@ export default function CropTool({ imageUrl, cropPoints, onChange }: CropToolPro
   const pointsSvgString = `${p0.x},${p0.y} ${p1.x},${p1.y} ${p2.x},${p2.y} ${p3.x},${p3.y}`;
 
   return (
-    <div className="flex flex-col items-center justify-center p-4">
-      <p className="text-xs text-gray-400 mb-3 text-center">
-        Arrastra las 4 esquinas para recortar y corregir la perspectiva del documento
-      </p>
-
+    <div className="flex-1 w-full h-full p-2 flex flex-col items-center justify-center relative">
       <div
         ref={containerRef}
-        className="relative w-full max-w-sm aspect-[3/4] bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden flex items-center justify-center touch-none select-none"
+        className="relative w-full h-full max-h-[70vh] bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden flex items-center justify-center touch-none select-none shadow-xl"
       >
         <img
           src={imageUrl}
