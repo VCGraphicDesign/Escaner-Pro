@@ -1,97 +1,133 @@
 @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
 
 :root {
+  /* Brand color tokens - CamScanner inspired */
   --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
-  --bg-dots: radial-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px);
-  --shadow-premium: 0 20px 40px -10px rgba(0, 0, 0, 0.6);
-  --shadow-glow: 0 0 15px rgba(34, 211, 238, 0.25);
-  color-scheme: dark;
+  
+  --bg-primary: #040813;      /* Deep Midnight Black */
+  --bg-secondary: #0b1120;    /* Dark Slate Gray */
+  --bg-tertiary: #131b2e;     /* Medium Slate Gray */
+  --bg-accent-alpha: rgba(16, 185, 129, 0.08); /* Emerald Alpha */
+  
+  --primary: #10b981;         /* Emerald Green */
+  --primary-hover: #34d399;   /* Light Emerald Green */
+  --primary-glow: rgba(16, 185, 129, 0.35);
+  
+  --secondary: #06b6d4;       /* Cyan */
+  --secondary-glow: rgba(6, 182, 212, 0.25);
+  
+  --text-primary: #f3f4f6;    /* High contrast text */
+  --text-secondary: #9ca3af;  /* Medium contrast text */
+  --text-muted: #6b7280;      /* Muted text */
+  
+  --border-light: rgba(255, 255, 255, 0.06);
+  --border-medium: rgba(255, 255, 255, 0.12);
+  
+  --shadow-premium: 0 12px 30px -5px rgba(0, 0, 0, 0.7);
+  --shadow-glow: 0 0 20px rgba(16, 185, 129, 0.2);
+  --bg-dots: radial-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px);
 }
 
 body {
   margin: 0;
   padding: 0;
   font-family: var(--font-sans);
-  background-color: #030712; /* Extreme dark gray slate */
+  background-color: var(--bg-primary);
   background-image: var(--bg-dots);
   background-size: 24px 24px;
-  color: #f3f4f6;
+  color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overflow-x: hidden;
+  height: 100vh;
 }
 
-/* Styled Scrollbars */
+#root {
+  min-height: 100vh;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Custom Scrollbars */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: #030712;
+  background: var(--bg-primary);
 }
 ::-webkit-scrollbar-thumb {
-  background: #1f2937;
+  background: var(--bg-tertiary);
   border-radius: 99px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #374151;
+  background: #25314c;
 }
 
-#root {
-  min-height: 100svh;
-  display: flex;
-  flex-direction: column;
+/* Base interactive elements */
+a, button, select, input {
+  font-family: var(--font-sans);
 }
 
-/* Button Classes */
+/* Standard Premium Buttons */
 .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  font-family: var(--font-sans);
   font-size: 14px;
   font-weight: 600;
   border-radius: 12px;
   border: 1px solid transparent;
   cursor: pointer;
+  padding: 10px 20px;
   transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
   outline: none;
   user-select: none;
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, #22d3ee 0%, #06b6d4 100%);
-  color: #030712;
-  box-shadow: 0 4px 15px -3px rgba(34, 211, 238, 0.4);
+  background: linear-gradient(135deg, var(--primary) 0%, #059669 100%);
+  color: #ffffff;
+  box-shadow: 0 4px 14px -3px var(--primary-glow);
 }
 .btn-primary:hover {
   transform: translateY(-1.5px);
-  box-shadow: 0 8px 20px -3px rgba(34, 211, 238, 0.5), var(--shadow-glow);
+  box-shadow: 0 8px 20px -3px var(--primary-glow), var(--shadow-glow);
+  background: linear-gradient(135deg, var(--primary-hover) 0%, var(--primary) 100%);
 }
 .btn-primary:active {
   transform: translateY(0);
 }
 
 .btn-secondary {
-  background: #111827;
-  border-color: #374151;
-  color: #d1d5db;
+  background: var(--bg-secondary);
+  border-color: var(--border-light);
+  color: var(--text-secondary);
 }
 .btn-secondary:hover {
-  background: #1f2937;
+  background: var(--bg-tertiary);
   color: #ffffff;
-  border-color: #4b5563;
-}
-.btn-secondary:active {
-  background: #111827;
+  border-color: var(--border-medium);
 }
 
-/* Range input styling overrides */
+.btn-danger {
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #f87171;
+}
+.btn-danger:hover {
+  background: rgba(239, 68, 68, 0.3);
+  color: #ffffff;
+  border-color: rgba(239, 68, 68, 0.5);
+}
+
+/* Slider Controls Styling */
 input[type='range'] {
   -webkit-appearance: none;
   appearance: none;
-  background: #1f2937;
+  background: var(--bg-primary);
   height: 6px;
   border-radius: 99px;
   outline: none;
@@ -99,20 +135,36 @@ input[type='range'] {
 input[type='range']::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
-  background: #22d3ee;
+  background: var(--primary);
   cursor: pointer;
-  box-shadow: 0 0 8px rgba(34, 211, 238, 0.5);
-  border: 2px solid #ffffff;
+  box-shadow: 0 0 10px var(--primary-glow);
+  border: 3px solid #ffffff;
   transition: transform 0.1s;
 }
 input[type='range']::-webkit-slider-thumb:hover {
   transform: scale(1.2);
 }
 
-/* Animations keys */
+/* Form input elements */
+.input-text {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  color: var(--text-primary);
+  padding: 8px 12px;
+  font-size: 14px;
+  outline: none;
+  transition: all 0.2s ease;
+}
+.input-text:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--bg-accent-alpha);
+}
+
+/* Base keyframe animations */
 @keyframes zoomIn {
   from {
     opacity: 0;
@@ -136,23 +188,28 @@ input[type='range']::-webkit-slider-thumb:hover {
   }
 }
 .animate-fade-in {
-  animation: fadeIn 0.15s ease-out forwards;
+  animation: fadeIn 0.18s ease-out forwards;
 }
 
-/* Camera viewport custom scale container */
-@media (max-width: 768px) {
-  .crop-screen img, .edit-screen img {
-    max-width: 92vw !important;
+@keyframes laserScan {
+  0% {
+    top: 0%;
+  }
+  50% {
+    top: 100%;
+  }
+  100% {
+    top: 0%;
   }
 }
-
-/* Editor text input focus animations */
-input:focus {
-  box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.2);
-}
-
-/* Dragging overlay elements sizing */
-.crop-screen svg, .crop-screen img {
-  user-select: none;
-  -webkit-user-drag: none;
+.laser-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, transparent 10%, var(--primary) 50%, transparent 90%);
+  box-shadow: 0 0 12px 2px var(--primary);
+  animation: laserScan 2.5s ease-in-out infinite;
+  z-index: 10;
+  pointer-events: none;
 }
