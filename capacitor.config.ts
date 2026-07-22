@@ -1,10 +1,9 @@
-import { defineConfig } from '@capacitor/cli';
+import type { CapacitorConfig } from '@capacitor/cli';
 
-const config = defineConfig({
+const config: CapacitorConfig = {
   appId: 'com.vcgraphicdesign.escanerpro',
   appName: 'Escaner Pro',
   webDir: 'dist',
-  bundledWebRuntime: false,
   server: {
     androidScheme: 'https'
   },
@@ -13,6 +12,6 @@ const config = defineConfig({
       signingType: 'apksigner'
     }
   }
-});
+};
 
 export default config;
