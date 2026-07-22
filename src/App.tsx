@@ -15,6 +15,8 @@ import {
   Sliders,
   Type,
   Layers,
+  Search,
+  ChevronDown,
 } from 'lucide-react';
 
 import {
@@ -42,6 +44,42 @@ function App() {
   const [activeTab, setActiveTab] = useState<'filters' | 'text'>('filters');
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [isNewScanForExistingDoc, setIsNewScanForExistingDoc] = useState<boolean>(false);
+  
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
+  const getActiveFilterPreset = (page: ScannedPage): string => {
+    if (page.binarize) return 'bw';
+    if (page.grayscale) return 'gray';
+    if (page.shadowRemoval) {
+      if (page.contrast > 10) return 'magic';
+      return 'lighten';
+    }
+    return 'original';
+  };
+
+  const applyFilterPreset = (page: ScannedPage, preset: string) => {
+    let updates: Partial<ScannedPage> = {};
+    if (preset === 'original') {
+      updates = { binarize: false, shadowRemoval: false, grayscale: false, brightness: 0, contrast: 0 };
+    } else if (preset === 'magic') {
+      updates = { binarize: false, shadowRemoval: true, grayscale: false, brightness: 6, contrast: 18 };
+    } else if (preset === 'lighten') {
+      updates = { binarize: false, shadowRemoval: true, grayscale: false, brightness: 12, contrast: 0 };
+    } else if (preset === 'bw') {
+      updates = { binarize: true, shadowRemoval: true, grayscale: false, binarizeThreshold: 10 };
+    } else if (preset === 'gray') {
+      updates = { binarize: false, shadowRemoval: false, grayscale: true, brightness: 0, contrast: 0 };
+    }
+    triggerImageProcessing(page, updates);
+  };
+
+  const filteredDocuments = documents.filter((doc) =>
+    doc.name.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const totalDocuments = documents.length;
+  const totalPages = documents.reduce((acc, doc) => acc + doc.pages.length, 0);
 
   // Load documents on mounted
   const loadDocuments = async () => {
@@ -321,72 +359,109 @@ function App() {
   const activePage = activeProject?.pages[activePageIndex];
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans relative">
+    <div className="editor-container animate-fade-in">
       
       {/* 1. HOME SCREEN */}
       {screen === 'home' && (
-        <div className="flex-1 flex flex-col w-full max-w-4xl mx-auto px-4 py-8">
+        <div className="home-container">
           
           {/* Header section */}
-          <header className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-10 border-b border-slate-900 pb-6 w-full">
+          <header className="header-section">
             <div>
-              <h1 className="text-3xl font-bold tracking-tight text-white m-0 flex items-center gap-2">
-                Document Scanner
-                <span className="text-xs font-semibold bg-cyan-950 border border-cyan-800 text-cyan-400 px-3 py-1 rounded-full flex items-center gap-1.5 shadow-[0_0_10px_rgba(34,211,238,0.1)]">
+              <h1 className="brand-title">
+                Escaner-Pro
+                <span className="brand-badge">
                   <Lock className="w-3.5 h-3.5" />
                   Local & Privado
                 </span>
               </h1>
-              <p className="text-slate-400 text-sm mt-1">
-                Tus archivos procesados 100% en el dispositivo. Sin nubes, seguro de por vida.
+              <p className="brand-subtitle">
+                Tus archivos procesados 100% en tu dispositivo. Sin nubes, seguro y privado.
               </p>
             </div>
             
             <button
               onClick={handleStartNewDocument}
-              className="btn btn-primary px-5 py-3 rounded-xl flex items-center justify-center gap-2 font-semibold shadow-lg hover:bg-cyan-500 transition-all transform active:scale-95 flex-shrink-0"
+              className="btn btn-primary"
             >
               <Camera className="w-5 h-5" />
               Escanear documento
             </button>
           </header>
 
-          {/* Documents Grid Dashboard */}
-          <main className="flex-grow">
-            <h2 className="text-xl font-bold mb-4 text-slate-200">Buzón de Escaneos</h2>
+          {/* Stats Summary Panel */}
+          <section className="stats-container">
+            <div className="stats-card">
+              <div className="stats-icon-wrapper">
+                <FileText className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="stats-value">{totalDocuments}</div>
+                <div className="stats-label">Documentos</div>
+              </div>
+            </div>
 
-            {documents.length > 0 ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
-                {documents.map((doc) => (
+            <div className="stats-card">
+              <div className="stats-icon-wrapper">
+                <Layers className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="stats-value">{totalPages}</div>
+                <div className="stats-label">Páginas</div>
+              </div>
+            </div>
+          </section>
+
+          {/* Search bar control */}
+          <div className="search-bar-container">
+            <Search className="search-icon w-5 h-5" />
+            <input
+              type="text"
+              placeholder="Buscar documento por nombre..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="search-input"
+            />
+          </div>
+
+          {/* Documents Grid Dashboard */}
+          <main style={{ flexGrow: 1 }}>
+            <h2 style={{ fontSize: '18px', fontWeight: 700, marginBottom: '16px', color: '#e5e7eb', textAlign: 'left' }}>
+              Buzón de Escaneos
+            </h2>
+
+            {filteredDocuments.length > 0 ? (
+              <div className="doc-grid">
+                {filteredDocuments.map((doc) => (
                   <div
                     key={doc.id}
                     onClick={() => handleOpenDocument(doc)}
-                    className="bg-slate-900 border border-slate-800 hover:border-slate-700 rounded-2xl p-4 flex flex-col gap-4 shadow-md hover:shadow-lg transition-all cursor-pointer relative group"
+                    className="doc-card"
                   >
                     {/* Thumbnail box */}
-                    <div className="aspect-[1/1.4] w-full bg-slate-950 rounded-xl overflow-hidden shadow-inner flex items-center justify-center relative">
+                    <div className="thumbnail-container">
                       {doc.pages[0]?.processedImage ? (
                         <img
                           src={doc.pages[0].processedImage}
                           alt={doc.name}
-                          className="w-full h-full object-cover"
+                          className="thumbnail-img"
                         />
                       ) : (
-                        <FileText className="w-12 h-12 text-slate-700" />
+                        <FileText className="w-12 h-12" style={{ color: 'var(--text-muted)' }} />
                       )}
                       
                       {/* Badge length */}
-                      <span className="absolute bottom-2.5 right-2.5 bg-slate-950/80 backdrop-blur-sm text-[10px] uppercase font-bold tracking-wider px-2 py-1 rounded text-slate-300">
+                      <span className="pages-badge">
                         {doc.pages.length} {doc.pages.length === 1 ? 'pág' : 'págs'}
                       </span>
                     </div>
 
                     {/* Meta info */}
-                    <div className="flex flex-col text-left">
-                      <h3 className="font-semibold text-slate-200 text-sm truncate mr-6" title={doc.name}>
+                    <div className="doc-meta">
+                      <h3 className="doc-title" title={doc.name}>
                         {doc.name}
                       </h3>
-                      <div className="flex items-center gap-1.5 text-slate-400 text-xs mt-1">
+                      <div className="doc-date">
                         <Calendar className="w-3.5 h-3.5" />
                         {new Date(doc.createdAt).toLocaleDateString('es-ES', {
                           day: 'numeric',
@@ -400,7 +475,7 @@ function App() {
                     {/* Floating delete button */}
                     <button
                       onClick={(e) => handleDeleteDocument(doc.id, e)}
-                      className="absolute top-6 right-6 bg-slate-950/80 hover:bg-red-500 opacity-0 group-hover:opacity-100 p-2 rounded-lg text-slate-400 hover:text-white transition-all shadow-md"
+                      className="doc-delete-btn"
                       title="Eliminar documento"
                     >
                       <Trash2 className="w-4 h-4" />
@@ -409,18 +484,24 @@ function App() {
                 ))}
               </div>
             ) : (
-              <div className="flex flex-col items-center justify-center text-center py-20 bg-slate-900/30 border-2 border-dashed border-slate-800 rounded-3xl p-6">
-                <FileText className="w-16 h-16 text-slate-700 mb-4" />
-                <h3 className="text-lg font-semibold text-slate-300">No hay documentos escaneados</h3>
-                <p className="text-slate-500 text-sm max-w-sm mb-6">
-                  Comienza a digitalizar tus facturas, recibos o apuntes presionando el botón superior.
+              <div className="empty-state">
+                <FileText className="empty-state-icon" />
+                <h3 className="empty-state-title">
+                  {searchQuery ? 'Sin resultados' : 'No hay documentos escaneados'}
+                </h3>
+                <p className="empty-state-desc">
+                  {searchQuery 
+                    ? 'No se encontraron documentos que coincidan con tu búsqueda.' 
+                    : 'Comienza a digitalizar tus facturas, recibos o apuntes presionando el botón superior.'}
                 </p>
-                <button
-                  onClick={handleStartNewDocument}
-                  className="btn btn-secondary px-5 py-2.5 rounded-xl text-slate-300 font-medium"
-                >
-                  Capturar hoja
-                </button>
+                {!searchQuery && (
+                  <button
+                    onClick={handleStartNewDocument}
+                    className="btn btn-secondary"
+                  >
+                    Capturar hoja
+                  </button>
+                )}
               </div>
             )}
           </main>
@@ -446,19 +527,20 @@ function App() {
 
       {/* 4. EDIT SCREEN */}
       {screen === 'edit' && activeProject && activePage && (
-        <div className="flex-1 flex flex-col h-screen overflow-hidden bg-slate-950">
+        <div className="editor-container">
           {/* Top Navbar */}
-          <div className="p-4 bg-slate-900 border-b border-slate-800 flex items-center justify-between z-20">
-            <div className="flex items-center gap-3">
+          <div className="top-navbar">
+            <div className="navbar-left">
               <button
                 onClick={handleGoHome}
-                className="btn btn-secondary p-2.5 rounded-lg text-slate-300 hover:text-white flex items-center justify-center"
+                className="btn btn-secondary"
+                style={{ padding: '8px 12px' }}
                 title="Volver"
               >
                 <ArrowLeft className="w-5 h-5" />
               </button>
               
-              <div className="text-left">
+              <div style={{ textAlign: 'left' }}>
                 <input
                   type="text"
                   value={activeProject.name}
@@ -467,36 +549,39 @@ function App() {
                     setActiveProject(renamed);
                     saveDocumentProject(renamed);
                   }}
-                  className="bg-transparent text-slate-100 font-bold border-b border-transparent hover:border-slate-700 focus:border-cyan-500 focus:outline-none text-sm px-1 py-0.5 truncate max-w-[150px] sm:max-w-[280px]"
+                  className="navbar-doc-title"
                 />
-                <div className="text-[10px] text-slate-400 px-1">
+                <div style={{ fontSize: '10px', color: 'var(--text-muted)', paddingLeft: '4px' }}>
                   Página {activePageIndex + 1} de {activeProject.pages.length}
                 </div>
               </div>
             </div>
 
-            <div className="flex gap-2">
+            <div className="navbar-right">
               <button
                 onClick={handleCropAgain}
-                className="btn btn-secondary p-2.5 rounded-lg text-slate-300 hover:text-white flex items-center gap-1.5"
-                title="Re-recortar"
+                className="btn btn-secondary"
+                style={{ padding: '8px 12px' }}
+                title="Ajustar recorte"
               >
                 <Crop className="w-4 h-4" />
-                <span className="text-xs hidden sm:inline">Recortar</span>
+                <span className="text-xs" style={{ display: 'none' }}>Recortar</span>
               </button>
 
               <button
                 onClick={handleRotateCurrentPage}
-                className="btn btn-secondary p-2.5 rounded-lg text-slate-300 hover:text-white flex items-center gap-1.5"
+                className="btn btn-secondary"
+                style={{ padding: '8px 12px' }}
                 title="Rotar 90"
               >
                 <RotateCw className="w-4 h-4" />
-                <span className="text-xs hidden sm:inline">Girar</span>
+                <span className="text-xs" style={{ display: 'none' }}>Girar</span>
               </button>
 
               <button
                 onClick={() => setShowSaveDialog(true)}
-                className="btn btn-primary px-4 py-2.5 rounded-lg text-slate-900 bg-cyan-400 hover:bg-cyan-500 font-semibold flex items-center gap-1.5"
+                className="btn btn-primary"
+                style={{ padding: '8px 16px' }}
               >
                 <Download className="w-4 h-4" />
                 <span className="text-xs">Guardar</span>
@@ -504,24 +589,25 @@ function App() {
             </div>
           </div>
 
-          {/* Main workspace (Splits into Image Preview vs right sidebar) */}
-          <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
+          {/* Main workspace */}
+          <div className="workspace-split">
             
             {/* Left Preview Workspace */}
-            <div className="flex-grow flex items-center justify-center p-6 bg-slate-950 overflow-auto relative">
-              <div className="relative inline-block shadow-[0_10px_35px_rgba(0,0,0,0.5)] border border-slate-900 max-h-[50vh] md:max-h-[70vh]">
+            <div className="preview-workspace">
+              <div className="image-wrapper">
                 
                 {isProcessing && (
-                  <div className="absolute inset-0 bg-slate-950/65 backdrop-blur-sm flex flex-col items-center justify-center z-50 rounded-lg">
-                    <span className="animate-spin inline-block w-8 h-8 border-4 border-cyan-400 border-t-transparent rounded-full mb-3" />
-                    <span className="text-xs text-cyan-400 font-medium">Binarizando imagen...</span>
+                  <div className="processing-overlay">
+                    <div className="processing-spinner" />
+                    <span className="processing-text">Digitalizando documento...</span>
+                    <div className="laser-line" />
                   </div>
                 )}
 
                 <img
                   src={activePage.processedImage}
                   alt="Processed Document Page"
-                  className="w-auto h-auto max-h-[50vh] md:max-h-[70vh] object-contain rounded-md"
+                  className="preview-img"
                   draggable={false}
                 />
 
@@ -529,26 +615,22 @@ function App() {
                 <TextLayerEditor
                   texts={activePage.texts}
                   onChange={handleTextLayerChange}
-                  imageWidth={500} // Mock size limits, layout auto calculates relative percentages
-                  imageHeight={707} // Mock size A4 aspect ratio 1:1.414
+                  imageWidth={500}
+                  imageHeight={707}
                   active={activeTab === 'text'}
                 />
               </div>
             </div>
 
             {/* Right Editing Control Sidebar */}
-            <div className="w-full md:w-80 bg-slate-900 border-t md:border-t-0 md:border-b-0 md:border-l border-slate-800 flex flex-col overflow-y-auto">
+            <div className="sidebar-controls">
               
               {/* Tab Header Selector */}
-              <div className="flex border-b border-slate-800">
+              <div className="tab-header">
                 <button
                   type="button"
                   onClick={() => setActiveTab('filters')}
-                  className={`flex-1 py-4 text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 transition-colors ${
-                    activeTab === 'filters'
-                      ? 'border-b-2 border-cyan-400 text-cyan-400 bg-cyan-950/10'
-                      : 'text-slate-400 hover:text-slate-200'
-                  }`}
+                  className={`tab-btn ${activeTab === 'filters' ? 'active' : ''}`}
                 >
                   <Sliders className="w-4 h-4" />
                   Filtros Limpieza
@@ -557,11 +639,7 @@ function App() {
                 <button
                   type="button"
                   onClick={() => setActiveTab('text')}
-                  className={`flex-1 py-4 text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 transition-colors ${
-                    activeTab === 'text'
-                      ? 'border-b-2 border-cyan-400 text-cyan-400 bg-cyan-950/10'
-                      : 'text-slate-400 hover:text-slate-200'
-                  }`}
+                  className={`tab-btn ${activeTab === 'text' ? 'active' : ''}`}
                 >
                   <Type className="w-4 h-4" />
                   Texto Editable
@@ -569,160 +647,161 @@ function App() {
               </div>
 
               {/* Side Panels contents */}
-              <div className="p-6 flex-grow flex flex-col gap-6">
+              <div className="panel-content">
 
                 {activeTab === 'filters' && (
                   <>
-                    <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest border-b border-slate-800 pb-2">
-                      Ajustes del Documento
+                    <h4 className="panel-title">
+                      Filtros Rápidos
                     </h4>
                     
-                    {/* Binarization Toggle Clean B&W */}
-                    <div className="flex items-center justify-between bg-slate-950 p-4 rounded-xl border border-slate-850">
-                      <div className="text-left">
-                        <span className="text-sm font-semibold text-slate-200 block">Blanco y Negro Limpio</span>
-                        <span className="text-[10px] text-slate-400">Elimina sombras y arrugas de papel</span>
-                      </div>
-                      
-                      <button
-                        onClick={() => {
-                          const val = !activePage.binarize;
-                          triggerImageProcessing(activePage, { binarize: val });
-                        }}
-                        className={`w-11 h-6 rounded-full p-1 transition-colors ${
-                          activePage.binarize ? 'bg-cyan-500' : 'bg-slate-700'
-                        }`}
+                    <div className="filter-grid">
+                      {/* Original preset */}
+                      <div 
+                        onClick={() => applyFilterPreset(activePage, 'original')}
+                        className={`filter-card ${getActiveFilterPreset(activePage) === 'original' ? 'active' : ''}`}
+                        title="Sin filtro"
                       >
-                        <div
-                          className={`bg-slate-900 w-4 h-4 rounded-full shadow-md transform transition-transform ${
-                            activePage.binarize ? 'translate-x-5' : 'translate-x-0'
-                          }`}
-                        />
-                      </button>
+                        <div className="filter-icon-box">
+                          <Sliders className="w-4 h-4" />
+                        </div>
+                        <span className="filter-label">Original</span>
+                      </div>
+
+                      {/* Magic Color preset */}
+                      <div 
+                        onClick={() => applyFilterPreset(activePage, 'magic')}
+                        className={`filter-card ${getActiveFilterPreset(activePage) === 'magic' ? 'active' : ''}`}
+                        title="Mejora automática de contraste y sombras"
+                      >
+                        <div className="filter-icon-box">
+                          <Camera className="w-4 h-4" />
+                        </div>
+                        <span className="filter-label">Mágico</span>
+                      </div>
+
+                      {/* Lighten preset */}
+                      <div 
+                        onClick={() => applyFilterPreset(activePage, 'lighten')}
+                        className={`filter-card ${getActiveFilterPreset(activePage) === 'lighten' ? 'active' : ''}`}
+                        title="Elimina sombras leves"
+                      >
+                        <div className="filter-icon-box">
+                          <Lock className="w-4 h-4" />
+                        </div>
+                        <span className="filter-label">Aclarar</span>
+                      </div>
+
+                      {/* B&W Clean preset */}
+                      <div 
+                        onClick={() => applyFilterPreset(activePage, 'bw')}
+                        className={`filter-card ${getActiveFilterPreset(activePage) === 'bw' ? 'active' : ''}`}
+                        title="Blanco y Negro limpio tipo fax"
+                      >
+                        <div className="filter-icon-box">
+                          <FileText className="w-4 h-4" />
+                        </div>
+                        <span className="filter-label">B&N Limpio</span>
+                      </div>
+
+                      {/* Grayscale preset */}
+                      <div 
+                        onClick={() => applyFilterPreset(activePage, 'gray')}
+                        className={`filter-card ${getActiveFilterPreset(activePage) === 'gray' ? 'active' : ''}`}
+                        title="Escala de grises estándar"
+                      >
+                        <div className="filter-icon-box">
+                          <Layers className="w-4 h-4" />
+                        </div>
+                        <span className="filter-label">Grises</span>
+                      </div>
                     </div>
 
-                    {/* Shadow removal toggle */}
-                    {!activePage.binarize && (
-                      <div className="flex items-center justify-between bg-slate-950 p-4 rounded-xl border border-slate-850">
-                        <div className="text-left">
-                          <span className="text-sm font-semibold text-slate-200 block">Eliminar Sombras</span>
-                          <span className="text-[10px] text-slate-400">Aplanamiento de iluminación</span>
-                        </div>
-                        <button
-                          onClick={() => {
-                            const val = !activePage.shadowRemoval;
-                            triggerImageProcessing(activePage, { shadowRemoval: val });
-                          }}
-                          className={`w-11 h-6 rounded-full p-1 transition-colors ${
-                            activePage.shadowRemoval ? 'bg-cyan-500' : 'bg-slate-700'
-                          }`}
-                        >
-                          <div
-                            className={`bg-slate-900 w-4 h-4 rounded-full shadow-md transform transition-transform ${
-                              activePage.shadowRemoval ? 'translate-x-5' : 'translate-x-0'
-                            }`}
-                          />
-                        </button>
-                      </div>
-                    )}
+                    {/* Advanced toggle collapsible */}
+                    <div 
+                      onClick={() => setShowAdvanced(!showAdvanced)}
+                      className="advanced-toggle"
+                    >
+                      <span className="advanced-toggle-label">Ajustes Manuales</span>
+                      <ChevronDown className={`advanced-toggle-icon w-4 h-4 ${showAdvanced ? 'open' : ''}`} />
+                    </div>
 
-                    {/* Grayscale toggle */}
-                    {!activePage.binarize && (
-                      <div className="flex items-center justify-between bg-slate-950 p-4 rounded-xl border border-slate-850">
-                        <div className="text-left">
-                          <span className="text-sm font-semibold text-slate-200 block">Escala de Grises</span>
-                          <span className="text-[10px] text-slate-400">Convertir foto a gris</span>
-                        </div>
-                        <button
-                          onClick={() => {
-                            const val = !activePage.grayscale;
-                            triggerImageProcessing(activePage, { grayscale: val });
-                          }}
-                          className={`w-11 h-6 rounded-full p-1 transition-colors ${
-                            activePage.grayscale ? 'bg-cyan-500' : 'bg-slate-700'
-                          }`}
-                        >
-                          <div
-                            className={`bg-slate-900 w-4 h-4 rounded-full shadow-md transform transition-transform ${
-                              activePage.grayscale ? 'translate-x-5' : 'translate-x-0'
-                            }`}
-                          />
-                        </button>
-                      </div>
-                    )}
-
-                    {/* Sliders adjustments */}
-                    {activePage.binarize ? (
-                      /* Binarization C Constant threshold slider */
-                      <div className="flex flex-col gap-2.5">
-                        <div className="flex justify-between text-xs font-semibold text-slate-400">
-                          <span>UMBRAL DE LIMPIEZA</span>
-                          <span className="text-cyan-400">{activePage.binarizeThreshold}</span>
-                        </div>
-                        <input
-                          type="range"
-                          min="1"
-                          max="28"
-                          value={activePage.binarizeThreshold}
-                          onChange={(e) => {
-                            const val = parseInt(e.target.value);
-                            triggerImageProcessing(activePage, { binarizeThreshold: val });
-                          }}
-                          className="w-full accent-cyan-400 h-1.5 bg-slate-850 rounded-lg appearance-none cursor-pointer"
-                        />
-                        <span className="text-[9px] text-slate-500 leading-normal text-left">
-                          Valores más bajos remueven arrugas leves; valores más altos hacen el texto negro más grueso.
-                        </span>
-                      </div>
-                    ) : (
-                      /* Brightness / Contrast Sliders */
-                      <div className="flex flex-col gap-5">
-                        <div className="flex flex-col gap-2.5">
-                          <div className="flex justify-between text-xs font-semibold text-slate-400">
-                            <span>BRILLO</span>
-                            <span className="text-cyan-400">{activePage.brightness}</span>
+                    {showAdvanced && (
+                      <div className="advanced-content animate-zoom-in">
+                        {/* Threshold Slider (if binarize is active) */}
+                        {activePage.binarize ? (
+                          <div className="slider-group">
+                            <div className="slider-info">
+                              <span>Umbral de Limpieza</span>
+                              <span className="slider-value">{activePage.binarizeThreshold}</span>
+                            </div>
+                            <input
+                              type="range"
+                              min="1"
+                              max="28"
+                              value={activePage.binarizeThreshold}
+                              onChange={(e) => {
+                                const val = parseInt(e.target.value);
+                                triggerImageProcessing(activePage, { binarizeThreshold: val });
+                              }}
+                              className="w-full"
+                            />
+                            <span className="slider-desc">
+                              Valores más bajos remueven arrugas leves; valores más altos hacen el texto negro más grueso.
+                            </span>
                           </div>
-                          <input
-                            type="range"
-                            min="-50"
-                            max="50"
-                            value={activePage.brightness}
-                            onChange={(e) => {
-                              const val = parseInt(e.target.value);
-                              triggerImageProcessing(activePage, { brightness: val });
-                            }}
-                            className="w-full accent-cyan-400 h-1.5 bg-slate-850 rounded-lg appearance-none cursor-pointer"
-                          />
-                        </div>
+                        ) : (
+                          <div className="advanced-content" style={{ border: 'none', marginTop: 0 }}>
+                            {/* Brightness slider */}
+                            <div className="slider-group">
+                              <div className="slider-info">
+                                <span>Brillo</span>
+                                <span className="slider-value">{activePage.brightness}</span>
+                              </div>
+                              <input
+                                type="range"
+                                min="-50"
+                                max="50"
+                                value={activePage.brightness}
+                                onChange={(e) => {
+                                  const val = parseInt(e.target.value);
+                                  triggerImageProcessing(activePage, { brightness: val });
+                                }}
+                                className="w-full"
+                              />
+                            </div>
 
-                        <div className="flex flex-col gap-2.5">
-                          <div className="flex justify-between text-xs font-semibold text-slate-400">
-                            <span>CONTRASTE</span>
-                            <span className="text-cyan-400">{activePage.contrast}</span>
+                            {/* Contrast slider */}
+                            <div className="slider-group" style={{ marginTop: '12px' }}>
+                              <div className="slider-info">
+                                <span>Contraste</span>
+                                <span className="slider-value">{activePage.contrast}</span>
+                              </div>
+                              <input
+                                type="range"
+                                min="-50"
+                                max="50"
+                                value={activePage.contrast}
+                                onChange={(e) => {
+                                  const val = parseInt(e.target.value);
+                                  triggerImageProcessing(activePage, { contrast: val });
+                                }}
+                                className="w-full"
+                              />
+                            </div>
                           </div>
-                          <input
-                            type="range"
-                            min="-50"
-                            max="50"
-                            value={activePage.contrast}
-                            onChange={(e) => {
-                              const val = parseInt(e.target.value);
-                              triggerImageProcessing(activePage, { contrast: val });
-                            }}
-                            className="w-full accent-cyan-400 h-1.5 bg-slate-850 rounded-lg appearance-none cursor-pointer"
-                          />
-                        </div>
+                        )}
                       </div>
                     )}
                   </>
                 )}
 
                 {activeTab === 'text' && (
-                  <div className="flex-grow flex flex-col items-center justify-center p-4 border border-dashed border-slate-800 rounded-2xl bg-slate-950/30">
-                    <Type className="w-12 h-12 text-slate-650 mb-3 animate-pulse" />
-                    <h5 className="font-semibold text-slate-350 text-sm">Editor de texto</h5>
-                    <p className="text-slate-500 text-xs mt-1 text-center leading-relaxed">
-                      Presiona el botón flotante inferior de tu documento para agregar texto arrastrable en cualquier lugar. Doble clic para escribir.
+                  <div className="text-editor-placeholder">
+                    <Type className="text-placeholder-icon w-10 h-10 animate-pulse" />
+                    <h5 className="text-placeholder-title">Editor de firmas y texto</h5>
+                    <p className="text-placeholder-desc">
+                      Presiona el botón flotante inferior de tu documento para agregar texto en cualquier lugar. Doble clic sobre él para escribir.
                     </p>
                   </div>
                 )}
@@ -732,48 +811,35 @@ function App() {
 
           </div>
 
-          {/* Bottom Pages Horizontal Thumbnails Strip Selector */}
-          <div className="p-4 bg-slate-900 border-t border-slate-805 flex flex-col gap-3 z-10">
-            <div className="flex justify-between items-center text-xs font-bold text-slate-400">
-              <span className="flex items-center gap-1">
-                <Layers className="w-4 h-4" />
-                PÁGINAS DEL DOCUMENTO
-              </span>
-              <span>{activeProject.pages.length} {activeProject.pages.length === 1 ? 'página' : 'páginas'}</span>
+          {/* Bottom Pages Strip */}
+          <div className="bottom-strip">
+            <div className="bottom-strip-header">
+              <span>Páginas del documento</span>
+              <span>{activeProject.pages.length} {activeProject.pages.length === 1 ? 'pág' : 'págs'}</span>
             </div>
 
-            <div className="flex items-center gap-4 overflow-x-auto py-1 scrollbar-thin">
-              
-              {/* Pages thumbnails */}
+            <div className="bottom-strip-list">
               {activeProject.pages.map((p, idx) => {
                 const isActive = idx === activePageIndex;
                 return (
                   <div
                     key={p.id}
                     onClick={() => setActivePageIndex(idx)}
-                    className={`flex-shrink-0 w-20 aspect-[1/1.4] bg-slate-950 border rounded-xl overflow-hidden cursor-pointer relative group flex flex-col justify-between ${
-                      isActive ? 'border-cyan-400 ring-2 ring-cyan-500/30 scale-95' : 'border-slate-850 hover:border-slate-700'
-                    }`}
+                    className={`bottom-strip-item ${isActive ? 'active' : ''}`}
                   >
                     <img
                       src={p.processedImage}
                       alt={`Page ${idx + 1}`}
-                      className="w-full h-full object-cover"
+                      className="bottom-strip-img"
                     />
+                    <div className="bottom-strip-num">{idx + 1}</div>
 
-                    {/* Page numbering badge */}
-                    <div className="absolute top-1 left-1 bg-slate-950/80 backdrop-blur-sm text-[9px] font-bold px-1.5 py-0.5 rounded text-slate-300">
-                      {idx + 1}
-                    </div>
-
-                    {/* Quick page actions buttons */}
-                    <div className="absolute inset-0 bg-slate-950/60 opacity-0 group-hover:opacity-100 flex items-center justify-center gap-1 transition-opacity">
-                      
+                    <div className="bottom-strip-actions">
                       {idx > 0 && (
                         <button
                           type="button"
                           onClick={(e) => movePageLeft(idx, e)}
-                          className="bg-slate-900 hover:bg-cyan-500 text-white p-1 rounded transition-colors"
+                          className="bottom-action-btn"
                           title="Mover a la izquierda"
                         >
                           <ChevronLeft className="w-3.5 h-3.5" />
@@ -786,7 +852,7 @@ function App() {
                           e.stopPropagation();
                           handleDeleteCurrentPage(idx);
                         }}
-                        className="bg-slate-900 hover:bg-red-500 text-white p-1 rounded transition-colors"
+                        className="bottom-action-btn"
                         title="Eliminar página"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -796,31 +862,28 @@ function App() {
                         <button
                           type="button"
                           onClick={(e) => movePageRight(idx, e)}
-                          className="bg-slate-900 hover:bg-cyan-500 text-white p-1 rounded transition-colors"
+                          className="bottom-action-btn"
                           title="Mover a la derecha"
                         >
                           <ChevronRight className="w-3.5 h-3.5" />
                         </button>
                       )}
-
                     </div>
                   </div>
                 );
               })}
 
-              {/* Add page slot card */}
               <button
                 onClick={handleAddPage}
-                className="flex-shrink-0 w-20 aspect-[1/1.4] bg-slate-950 border border-dashed border-slate-800 hover:border-cyan-500/50 rounded-xl flex flex-col items-center justify-center gap-1 text-slate-500 hover:text-cyan-400 transition-colors"
+                className="bottom-add-btn"
               >
-                <Plus className="w-6 h-6" />
-                <span className="text-[10px] font-bold">Añadir</span>
+                <Plus className="w-5 h-5" />
+                <span style={{ fontSize: '9px', fontWeight: 'bold' }}>Añadir</span>
               </button>
-
             </div>
           </div>
 
-          {/* Export dialog prompt */}
+          {/* Export dialog */}
           {showSaveDialog && (
             <SaveDialog
               pages={activeProject.pages}
