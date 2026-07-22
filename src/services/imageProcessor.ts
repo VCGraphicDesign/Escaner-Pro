@@ -31,7 +31,7 @@ export async function processPageImage(
     brightness: number;
     contrast: number;
     sharpness: number;
-    filter: 'original' | 'auto' | 'bw' | 'grayscale' | 'enhanced' | 'gamma';
+    filter: 'original' | 'auto' | 'bw' | 'grayscale' | 'enhanced' | 'gamma' | 'restore';
     rotation: number;
     crop: CropPoints | null;
   }
@@ -61,13 +61,7 @@ export async function processPageImage(
     const croppedCanvas = document.createElement('canvas');
     const croppedCtx = croppedCanvas.getContext('2d');
     if (croppedCtx) {
-      // Para simplificar y mantener alto rendimiento offline,
-      // realizamos un recorte basado en la bounding box del polígono de recorte.
-      // Opcionalmente podemos aplicar transformación perspectiva homográfica en el canvas.
-      // Implementamos una transformación perspectiva simplificada (bilinear approximation)
-      // para cumplir con `correctPerspective(canvas, corners)`
       applyPerspectiveCrop(canvas, croppedCanvas, adjustments.crop);
-      // Reemplazar canvas principal con el recortado
       canvas.width = croppedCanvas.width;
       canvas.height = croppedCanvas.height;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -80,8 +74,6 @@ export async function processPageImage(
   const data = imgData.data;
 
   // 3. Aplicar Brillo y Contraste básicos
-  // Brillo: factor (0.5 a 1.5)
-  // Contraste: factor (0.5 a 1.5)
   const bFactor = adjustments.brightness / 100;
   const cFactor = adjustments.contrast / 100;
 
@@ -90,17 +82,14 @@ export async function processPageImage(
     let g = data[i + 1];
     let b = data[i + 2];
 
-    // Aplicar brillo
     r = r * bFactor;
     g = g * bFactor;
     b = b * bFactor;
 
-    // Aplicar contraste (alrededor del valor medio 128)
     r = (r - 128) * cFactor + 128;
     g = (g - 128) * cFactor + 128;
     b = (b - 128) * cFactor + 128;
 
-    // Limitar valores entre 0 y 255
     data[i] = Math.min(255, Math.max(0, r));
     data[i + 1] = Math.min(255, Math.max(0, g));
     data[i + 2] = Math.min(255, Math.max(0, b));
@@ -116,12 +105,12 @@ export async function processPageImage(
   } else if (adjustments.filter === 'enhanced') {
     applyColorEnhancement(canvas);
   } else if (adjustments.filter === 'auto') {
-    // Combinación de iluminación balanceada y mejora de bordes
     normalizeIllumination(canvas);
     applyColorEnhancement(canvas);
   } else if (adjustments.filter === 'gamma') {
-    // Corrección gamma para eliminar sombras, manchas y ruido
     applyGammaCorrection(canvas);
+  } else if (adjustments.filter === 'restore') {
+    restoreDocument(canvas);
   }
 
   // 5. Aplicar Nitidez (Sharpness) si es mayor a cero
@@ -501,6 +490,153 @@ export function applyGammaCorrection(canvas: HTMLCanvasElement) {
     data[i + 1] = gammaCorrection[data[i + 1]]; // G
     data[i + 2] = gammaCorrection[data[i + 2]]; // B
   }
+
+  ctx.putImageData(imgData, 0, 0);
+}
+
+/**
+ * RESTAURADOR PRINCIPAL DE DOCUMENTOS
+ * Elimina arrugas, sombras de doblado y perforaciones de carpetas en una sola pasada.
+ */
+export function restoreDocument(canvas: HTMLCanvasElement) {
+  removeWrinklesAndShadows(canvas);
+  removePunchHoles(canvas);
+}
+
+/**
+ * Algoritmo de eliminación de arrugas, pliegues y sombras.
+ * Utiliza igualación de iluminación morfológica para que el papel sea blanco uniforme.
+ */
+export function removeWrinklesAndShadows(canvas: HTMLCanvasElement) {
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  const w = canvas.width;
+  const h = canvas.height;
+  const imgData = ctx.getImageData(0, 0, w, h);
+  const data = imgData.data;
+
+  // 1. Crear mapa de iluminación creando una versión suavizada/blur de baja frecuencia
+  const bgCanvas = document.createElement('canvas');
+  bgCanvas.width = Math.max(30, Math.floor(w / 16));
+  bgCanvas.height = Math.max(30, Math.floor(h / 16));
+  const bgCtx = bgCanvas.getContext('2d');
+  if (!bgCtx) return;
+
+  // Dibujar a baja resolución (suavizado implícito)
+  bgCtx.drawImage(canvas, 0, 0, bgCanvas.width, bgCanvas.height);
+  const bgData = bgCtx.getImageData(0, 0, bgCanvas.width, bgCanvas.height).data;
+  const bgW = bgCanvas.width;
+  const bgH = bgCanvas.height;
+
+  // 2. Normalizar cada píxel comparándolo con la luminancia del fondo local
+  for (let y = 0; y < h; y++) {
+    const bgY = Math.min(bgH - 1, Math.floor((y / h) * bgH));
+    for (let x = 0; x < w; x++) {
+      const bgX = Math.min(bgW - 1, Math.floor((x / w) * bgW));
+      const bgIdx = (bgY * bgW + bgX) * 4;
+
+      const bgR = bgData[bgIdx] || 200;
+      const bgG = bgData[bgIdx + 1] || 200;
+      const bgB = bgData[bgIdx + 2] || 200;
+
+      const idx = (y * w + x) * 4;
+      const r = data[idx];
+      const g = data[idx + 1];
+      const b = data[idx + 2];
+
+      // Aclarar píxeles de sombras y arrugas
+      const normR = (r / Math.max(20, bgR)) * 245;
+      const normG = (g / Math.max(20, bgG)) * 245;
+      const normB = (b / Math.max(20, bgB)) * 245;
+
+      data[idx] = Math.min(255, Math.max(0, normR));
+      data[idx + 1] = Math.min(255, Math.max(0, normG));
+      data[idx + 2] = Math.min(255, Math.max(0, normB));
+    }
+  }
+
+  ctx.putImageData(imgData, 0, 0);
+}
+
+/**
+ * Algoritmo de inpainting/relleno inteligente de perforaciones de carpetas.
+ * Escanea los márgenes laterales e identifica manchas/huecos circulares oscuros.
+ */
+export function removePunchHoles(canvas: HTMLCanvasElement) {
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  const w = canvas.width;
+  const h = canvas.height;
+  const imgData = ctx.getImageData(0, 0, w, h);
+  const data = imgData.data;
+
+  // Definir zonas de margen (15% izquierdo y derecho)
+  const marginWidth = Math.floor(w * 0.15);
+  const holeRadiusMin = Math.max(4, Math.floor(w * 0.015));
+  const holeRadiusMax = Math.max(12, Math.floor(w * 0.045));
+
+  const checkRegionForHoles = (startX: number, endX: number) => {
+    for (let y = holeRadiusMax; y < h - holeRadiusMax; y += 4) {
+      for (let x = startX; x < endX; x += 4) {
+        const idx = (y * w + x) * 4;
+        const brightness = (data[idx] + data[idx + 1] + data[idx + 2]) / 3;
+
+        // Si detectamos un punto muy oscuro rodeado de blanco (posible perforación)
+        if (brightness < 70) {
+          // Verificar si el vecindario externo es claro (papel)
+          let isBorderLight = true;
+          let lightR = 0, lightG = 0, lightB = 0, count = 0;
+
+          for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 4) {
+            const checkX = Math.round(x + Math.cos(angle) * (holeRadiusMax + 2));
+            const checkY = Math.round(y + Math.sin(angle) * (holeRadiusMax + 2));
+
+            if (checkX >= 0 && checkX < w && checkY >= 0 && checkY < h) {
+              const cIdx = (checkY * w + checkX) * 4;
+              const cBright = (data[cIdx] + data[cIdx + 1] + data[cIdx + 2]) / 3;
+              if (cBright < 150) {
+                isBorderLight = false;
+                break;
+              }
+              lightR += data[cIdx];
+              lightG += data[cIdx + 1];
+              lightB += data[cIdx + 2];
+              count++;
+            }
+          }
+
+          // Si efectivamente es un hueco de perforación rodeado de papel
+          if (isBorderLight && count > 0) {
+            const fillR = Math.round(lightR / count);
+            const fillG = Math.round(lightG / count);
+            const fillB = Math.round(lightB / count);
+
+            // Rellenar el área de la perforación con el color del papel adyacente
+            for (let dy = -holeRadiusMax; dy <= holeRadiusMax; dy++) {
+              for (let dx = -holeRadiusMax; dx <= holeRadiusMax; dx++) {
+                if (dx * dx + dy * dy <= holeRadiusMax * holeRadiusMax) {
+                  const px = x + dx;
+                  const py = y + dy;
+                  if (px >= 0 && px < w && py >= 0 && py < h) {
+                    const pIdx = (py * w + px) * 4;
+                    data[pIdx] = fillR;
+                    data[pIdx + 1] = fillG;
+                    data[pIdx + 2] = fillB;
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  };
+
+  // Escanear margen izquierdo y derecho
+  checkRegionForHoles(2, marginWidth);
+  checkRegionForHoles(w - marginWidth, w - 2);
 
   ctx.putImageData(imgData, 0, 0);
 }

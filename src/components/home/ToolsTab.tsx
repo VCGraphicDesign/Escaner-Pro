@@ -464,27 +464,7 @@ export default function ToolsTab({ onStartNewScan }: ToolsTabProps) {
               <ChevronRight size={18} className="text-gray-500 group-hover:text-white transition-colors" />
             </button>
 
-            {/* Opción Corrección de Ángulo */}
-            <button
-              onClick={() => {
-                setActiveTool('correccion_angulo');
-                resetToolStates();
-              }}
-              className="flex items-center gap-4 p-4 rounded-xl border border-[#2C2C2E] bg-[#1C1C1E] hover:bg-[#2C2C2E]/60 hover:border-[#2979FF]/40 transition-all text-left group"
-            >
-              <div className="p-3 rounded-xl bg-[#FF6B6B]/10 text-[#FF6B6B] group-hover:scale-105 transition-transform">
-                <RotateCcw size={24} />
-              </div>
-              <div className="flex-1">
-                <h4 className="text-sm font-bold text-white">Corrección de Ángulo</h4>
-                <p className="text-[11px] text-gray-400 mt-0.5">
-                  Alinea el texto horizontalmente para mejorar el reconocimiento de caracteres (OCR).
-                </p>
-              </div>
-              <ChevronRight size={18} className="text-gray-500 group-hover:text-white transition-colors" />
-            </button>
-
-            {/* Opción Herramientas de Edición */}
+            {/* Opción Restaurador de Documentos (Real) */}
             <button
               onClick={() => {
                 setActiveTool('herramientas_edicion');
@@ -493,12 +473,12 @@ export default function ToolsTab({ onStartNewScan }: ToolsTabProps) {
               className="flex items-center gap-4 p-4 rounded-xl border border-[#2C2C2E] bg-[#1C1C1E] hover:bg-[#2C2C2E]/60 hover:border-[#2979FF]/40 transition-all text-left group"
             >
               <div className="p-3 rounded-xl bg-[#4ECDC4]/10 text-[#4ECDC4] group-hover:scale-105 transition-transform">
-                <Edit size={24} />
+                <Sparkles size={24} />
               </div>
               <div className="flex-1">
-                <h4 className="text-sm font-bold text-white">Herramientas de Edición</h4>
+                <h4 className="text-sm font-bold text-white">Quitar Arrugas y Perforaciones</h4>
                 <p className="text-[11px] text-gray-400 mt-0.5">
-                  Permiten eliminar imperfecciones específicas como perforaciones o bordes negros residuales.
+                  Elimina marcas de pliegues, dobleces y hoyos de carpeta sustituyéndolos por papel blanco.
                 </p>
               </div>
               <ChevronRight size={18} className="text-gray-500 group-hover:text-white transition-colors" />
@@ -945,79 +925,87 @@ export default function ToolsTab({ onStartNewScan }: ToolsTabProps) {
             </div>
           )}
 
-          {/* PASO 2: EDICIÓN ACTIVA DE CORRECCIÓN DE ÁNGULO */}
-          {selectedImage && activeTool === 'correccion_angulo' && (
-            <div className="flex flex-col gap-4 animate-fade-in">
-              <p className="text-xs text-gray-400">
-                Esta herramienta alinea el texto horizontalmente para mejorar el reconocimiento de caracteres (OCR).
-              </p>
-
-              {/* Preview de la Imagen */}
-              <div className="border border-[#2C2C2E] rounded-2xl bg-neutral-950 p-2 overflow-hidden flex flex-col items-center justify-center relative min-h-[250px]">
-                <img
-                  src={selectedImage}
-                  alt="Imagen para corrección de ángulo"
-                  className="max-h-[40vh] object-contain rounded-xl shadow-lg"
-                  referrerPolicy="no-referrer"
-                />
-              </div>
-
-              {/* Controles de Corrección de Ángulo */}
-              <div className="bg-[#1C1C1E] border border-[#2C2C2E] rounded-2xl p-4 flex flex-col gap-4">
-                <div className="flex flex-col gap-1.5">
-                  <div className="flex justify-between text-[10px] font-bold text-gray-500 uppercase tracking-wider">
-                    <span>Rotación:</span>
-                    <span className="text-[#FF6B6B]">0°</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="-45"
-                    max="45"
-                    defaultValue="0"
-                    className="w-full accent-[#FF6B6B]"
-                  />
-                </div>
-
-                <p className="text-[10px] text-gray-500 text-center">
-                  Funcionalidad en desarrollo - Próximamente podrás rotar automáticamente para alinear el texto.
-                </p>
-              </div>
-            </div>
-          )}
-
-          {/* PASO 2: EDICIÓN ACTIVA DE HERRAMIENTAS DE EDICIÓN */}
+          {/* PASO 2: EDICIÓN ACTIVA DE RESTAURADOR DE DOCUMENTOS (REAL) */}
           {selectedImage && activeTool === 'herramientas_edicion' && (
             <div className="flex flex-col gap-4 animate-fade-in">
               <p className="text-xs text-gray-400">
-                Estas herramientas permiten eliminar imperfecciones específicas como perforaciones o bordes negros residuales.
+                Esta herramienta elimina marcas de doblado, pliegues, arrugas y hoyos de perforadora sustituyéndolos por papel limpio.
               </p>
 
-              {/* Preview de la Imagen */}
+              {/* Preview de la Imagen Procesada o Cargando */}
               <div className="border border-[#2C2C2E] rounded-2xl bg-neutral-950 p-2 overflow-hidden flex flex-col items-center justify-center relative min-h-[250px]">
                 <img
-                  src={selectedImage}
-                  alt="Imagen para herramientas de edición"
+                  src={improvedImagePreview || selectedImage}
+                  alt="Imagen procesada"
                   className="max-h-[40vh] object-contain rounded-xl shadow-lg"
                   referrerPolicy="no-referrer"
                 />
+                {isProcessingTool && (
+                  <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center gap-2 text-[#2979FF]">
+                    <RefreshCw className="animate-spin" size={28} />
+                    <span className="text-xs font-bold text-white">Limpiando arrugas y hoyos...</span>
+                  </div>
+                )}
               </div>
 
-              {/* Opciones de Edición */}
-              <div className="bg-[#1C1C1E] border border-[#2C2C2E] rounded-2xl p-4 flex flex-col gap-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <button className="py-3 px-4 rounded-xl text-xs font-bold border border-[#2C2C2E] bg-[#1C1C1E] hover:bg-[#2C2C2E] transition-all flex items-center justify-center gap-2 text-white">
-                    <Eraser size={14} />
-                    Eliminar Bordes
+              {/* Acciones */}
+              <div className="flex flex-col gap-3">
+                {!improvedImagePreview ? (
+                  <button
+                    onClick={async () => {
+                      setIsProcessingTool(true);
+                      try {
+                        const restored = await processPageImage(selectedImage, {
+                          brightness: 100,
+                          contrast: 100,
+                          sharpness: 20,
+                          filter: 'restore',
+                          rotation: 0,
+                          crop: null,
+                        });
+                        setImprovedImagePreview(restored);
+                      } catch (err) {
+                        console.error('Error al restaurar', err);
+                      } finally {
+                        setIsProcessingTool(false);
+                      }
+                    }}
+                    disabled={isProcessingTool}
+                    className="w-full py-3.5 px-4 rounded-xl text-xs font-bold bg-[#2979FF] hover:bg-[#2979FF]/90 text-white flex items-center justify-center gap-2 shadow-lg shadow-[#2979FF]/20"
+                  >
+                    <Sparkles size={16} />
+                    Ejecutar Limpieza de Arrugas y Hoyos
                   </button>
-                  <button className="py-3 px-4 rounded-xl text-xs font-bold border border-[#2C2C2E] bg-[#1C1C1E] hover:bg-[#2C2C2E] transition-all flex items-center justify-center gap-2 text-white">
-                    <Crop size={14} />
-                    Recortar Márgenes
-                  </button>
-                </div>
+                ) : (
+                  <div className="flex flex-col gap-3">
+                    <div className="grid grid-cols-2 gap-3">
+                      <button
+                        onClick={() => handleDownload(improvedImagePreview)}
+                        className="py-3 px-4 rounded-xl text-xs font-bold border border-[#2C2C2E] bg-[#1C1C1E] hover:bg-[#2C2C2E] transition-all flex items-center justify-center gap-1.5 text-white"
+                      >
+                        <Download size={14} />
+                        Descargar
+                      </button>
+                      <button
+                        onClick={() => handleSaveToDocuments(improvedImagePreview)}
+                        className="py-3 px-4 rounded-xl text-xs font-bold bg-[#2979FF] hover:bg-[#2979FF]/90 text-white flex items-center justify-center gap-1.5 shadow-lg shadow-[#2979FF]/20"
+                      >
+                        <Save size={14} />
+                        Guardar Escaneo
+                      </button>
+                    </div>
+                  </div>
+                )}
 
-                <p className="text-[10px] text-gray-500 text-center">
-                  Funcionalidad en desarrollo - Próximamente podrás eliminar imperfecciones específicas.
-                </p>
+                <button
+                  onClick={() => {
+                    setSelectedImage(null);
+                    setImprovedImagePreview(null);
+                  }}
+                  className="py-2 px-4 text-xs font-medium text-gray-400 hover:text-white text-center"
+                >
+                  Elegir otra imagen
+                </button>
               </div>
             </div>
           )}
