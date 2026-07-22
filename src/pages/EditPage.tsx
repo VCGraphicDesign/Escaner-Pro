@@ -268,7 +268,7 @@ export default function EditPage({ document: initialDoc, onBack, onNavigateToCle
   };
 
   // Guardar documento localmente y descargar
-  const handleSaveDocument = async (name: string, format: 'pdf' | 'jpg' | 'png') => {
+  const handleSaveDocument = async (name: string, format: 'pdf') => {
     // 1. Quemar/dibujar las anotaciones de texto en la imagen antes de exportar
     const finalPages = await Promise.all(
       doc.pages.map(async (page) => {
@@ -321,16 +321,8 @@ export default function EditPage({ document: initialDoc, onBack, onNavigateToCle
     // Almacenar en base de datos local
     saveDocument(docWithBurnedLayers);
 
-    // 2. Exportar / Descargar según formato
-    if (format === 'pdf') {
-      await generatePDF(name, finalPages);
-    } else {
-      // JPG o PNG (Descargar la primera página procesada)
-      const downloadLink = document.createElement('a');
-      downloadLink.href = finalPages[0].processedImage;
-      downloadLink.download = `${name}.${format}`;
-      downloadLink.click();
-    }
+    // 2. Exportar / Descargar como PDF
+    await generatePDF(name, finalPages);
   };
 
   return (

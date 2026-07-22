@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Check, Sparkles, CopyCheck, RefreshCw, ChevronLeft, ChevronRight, Crop, Sliders } from 'lucide-react';
+import { ArrowLeft, Check, Sparkles, CopyCheck, RefreshCw, ChevronLeft, ChevronRight, Crop, Sliders, ZoomIn, ZoomOut } from 'lucide-react';
 import { ScannedPage } from '../types';
 import { processPageImage } from '../services/imageProcessor';
 import FilterCarousel from '../components/clean/FilterCarousel';
@@ -24,6 +24,7 @@ export default function CleanPage({ capturedPages, onBack, onFinishCleaning }: C
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
   const [activeTab, setActiveTab] = useState<TabType>('filtros');
+  const [zoomLevel, setZoomLevel] = useState(1);
 
   // Inicializar páginas con puntos de recorte predeterminados si no tienen
   useEffect(() => {
@@ -208,11 +209,12 @@ export default function CleanPage({ capturedPages, onBack, onFinishCleaning }: C
             onChange={(pts) => updateAdjustment('crop', pts)}
           />
         ) : (
-          <div className="relative w-full h-full flex items-center justify-center">
+          <div className="relative w-full h-full flex items-center justify-center overflow-auto">
             <img
               src={currentPage.processedImage}
               alt="Documento Procesado"
-              className="max-w-full max-h-full object-contain rounded-lg shadow-2xl"
+              className="max-w-none max-h-none object-contain rounded-lg shadow-2xl transition-transform duration-200"
+              style={{ transform: `scale(${zoomLevel})` }}
               referrerPolicy="no-referrer"
             />
             {isProcessing && (
@@ -220,6 +222,30 @@ export default function CleanPage({ capturedPages, onBack, onFinishCleaning }: C
                 <RefreshCw className="animate-spin" size={32} />
               </div>
             )}
+            {/* Controles de Zoom */}
+            <div className="absolute bottom-4 right-4 flex flex-col gap-2 z-30">
+              <button
+                onClick={() => setZoomLevel(Math.min(zoomLevel + 0.25, 3))}
+                className="p-2 bg-black/60 backdrop-blur-md rounded-lg text-white hover:bg-black/80 transition-colors"
+                title="Ampliar"
+              >
+                <ZoomIn size={20} />
+              </button>
+              <button
+                onClick={() => setZoomLevel(Math.max(zoomLevel - 0.25, 0.5))}
+                className="p-2 bg-black/60 backdrop-blur-md rounded-lg text-white hover:bg-black/80 transition-colors"
+                title="Reducir"
+              >
+                <ZoomOut size={20} />
+              </button>
+              <button
+                onClick={() => setZoomLevel(1)}
+                className="p-2 bg-black/60 backdrop-blur-md rounded-lg text-white hover:bg-black/80 transition-colors text-xs font-bold"
+                title="Restablecer zoom"
+              >
+                {Math.round(zoomLevel * 100)}%
+              </button>
+            </div>
           </div>
         )}
       </div>
