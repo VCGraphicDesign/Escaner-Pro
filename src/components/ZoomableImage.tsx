@@ -9,17 +9,29 @@ interface ZoomableImageProps {
 export const ZoomableImage: React.FC<ZoomableImageProps> = ({ src, alt = '', className = '' }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [lastDist, setLastDist] = useState<number | null>(null);
+  const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
 
-  // Wheel zoom for desktop
+  // Reset scale and offset when image source changes
+  useEffect(() => {
+    setScale(1);
+    setOffset({ x: 0, y: 0 });
+  }, [src]);
+
+  // Wheel zoom for desktop / mouse
   const handleWheel = (e: React.WheelEvent) => {
     e.preventDefault();
     const delta = -e.deltaY;
-    const factor = delta > 0 ? 1.05 : 0.95;
-    setScale(prev => Math.min(5, Math.max(1, prev * factor)));
+    const factor = delta > 0 ? 1.1 : 0.9;
+    setScale((prev) => {
+      const nextScale = Math.min(5, Math.max(1, prev * factor));
+      if (nextScale === 1) setOffset({ x: 0, y: 0 });
+      return nextScale;
+    });
   };
 
-  // Pinch‑zoom for touch devices
+  // Touch pinch‑zoom for mobile touchscreens
   const handleTouchMove = (e: React.TouchEvent) => {
     if (e.touches.length === 2) {
       const [t1, t2] = [e.touches[0], e.touches[1]];
@@ -28,8 +40,12 @@ export const ZoomableImage: React.FC<ZoomableImageProps> = ({ src, alt = '', cla
       const dist = Math.hypot(dx, dy);
       if (lastDist !== null) {
         const diff = dist - lastDist;
-        const factor = diff > 0 ? 1.02 : 0.98;
-        setScale(prev => Math.min(5, Math.max(1, prev * factor)));
+        const factor = diff > 0 ? 1.03 : 0.97;
+        setScale((prev) => {
+          const nextScale = Math.min(5, Math.max(1, prev * factor));
+          if (nextScale === 1) setOffset({ x: 0, y: 0 });
+          return nextScale;
+        });
       }
       setLastDist(dist);
     }
@@ -37,35 +53,54 @@ export const ZoomableImage: React.FC<ZoomableImageProps> = ({ src, alt = '', cla
 
   const handleTouchEnd = () => setLastDist(null);
 
-  // Prevent page‑level pinch‑zoom when interacting with the image
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const prevent = (e: TouchEvent) => { if (e.touches.length > 1) e.preventDefault(); };
-    el.addEventListener('touchmove', prevent, { passive: false });
-    return () => el.removeEventListener('touchmove', prevent);
-  }, []);
-
-  const [offset, setOffset] = useState({ x: 0, y: 0 });
-  const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
-
-  // Mouse / pointer drag for panning when zoomed
+  // Touch/pointer dragging for panning when zoomed in
   const handlePointerDown = (e: React.PointerEvent) => {
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
-    setDragStart({ x: e.clientX, y: e.clientY });
-  };
-  const handlePointerMove = (e: React.PointerEvent) => {
-    if (dragStart) {
-      const dx = e.clientX - dragStart.x;
-      const dy = e.clientY - dragStart.y;
-      setOffset(prev => ({ x: prev.x + dx, y: prev.y + dy }));
+    if (scale > 1) {
+      try {
+        (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+      } catch (_) {}
       setDragStart({ x: e.clientX, y: e.clientY });
     }
   };
-  const handlePointerUp = (e: React.PointerEvent) => {
-    (e.target as HTMLElement).releasePointerCapture(e.pointerId);
-    setDragStart(null);
+
+  const handlePointerMove = (e: React.PointerEvent) => {
+    if (dragStart && scale > 1) {
+      const dx = e.clientX - dragStart.x;
+      const dy = e.clientY - dragStart.y;
+      setOffset((prev) => ({ x: prev.x + dx, y: prev.y + dy }));
+      setDragStart({ x: e.clientX, y: e.clientY });
+    }
   };
+
+  const handlePointerUp = (e: React.PointerEvent) => {
+    if (dragStart) {
+      try {
+        (e.target as HTMLElement).releasePointerCapture?.(e.pointerId);
+      } catch (_) {}
+      setDragStart(null);
+    }
+  };
+
+  // Double tap to quickly zoom in/out
+  const handleDoubleClick = () => {
+    if (scale > 1) {
+      setScale(1);
+      setOffset({ x: 0, y: 0 });
+    } else {
+      setScale(2.5);
+    }
+  };
+
+  // Prevent default page scrolling when pinching
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const prevent = (e: TouchEvent) => {
+      if (e.touches.length > 1) e.preventDefault();
+    };
+    el.addEventListener('touchmove', prevent, { passive: false });
+    return () => el.removeEventListener('touchmove', prevent);
+  }, []);
 
   return (
     <div
@@ -77,14 +112,17 @@ export const ZoomableImage: React.FC<ZoomableImageProps> = ({ src, alt = '', cla
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
+      onDoubleClick={handleDoubleClick}
       style={{
         overflow: 'hidden',
         touchAction: 'none',
-        display: 'inline-block',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
         width: '100%',
         height: '100%',
         position: 'relative',
-        // Use transform on the image instead of container to avoid clipping size limits
+        userSelect: 'none',
       }}
     >
       <img
@@ -93,12 +131,12 @@ export const ZoomableImage: React.FC<ZoomableImageProps> = ({ src, alt = '', cla
         className={className}
         style={{
           transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})`,
-          transition: 'transform 0.1s ease-out',
+          transition: dragStart ? 'none' : 'transform 0.15s ease-out',
           transformOrigin: 'center center',
-          width: '100%',
-          height: 'auto',
+          maxWidth: '100%',
+          maxHeight: '100%',
+          objectFit: 'contain',
           display: 'block',
-          // Prevent image dragging default behavior
           userSelect: 'none',
           pointerEvents: 'none',
         }}

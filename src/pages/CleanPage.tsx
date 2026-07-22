@@ -9,6 +9,7 @@ import { ScannedPage } from '../types';
 import { processPageImage } from '../services/imageProcessor';
 import FilterCarousel from '../components/clean/FilterCarousel';
 import CropTool from '../components/clean/CropTool';
+import { ZoomableImage } from '../components/ZoomableImage';
 
 interface CleanPageProps {
   capturedPages: ScannedPage[];
@@ -205,43 +206,17 @@ export default function CleanPage({ capturedPages, onBack, onFinishCleaning }: C
             onChange={(pts) => updateAdjustment('crop', pts)}
           />
         ) : (
-          <div className="relative w-full h-full flex items-center justify-center overflow-auto">
-            <img
+          <div className="relative w-full h-full flex items-center justify-center overflow-hidden p-2">
+            <ZoomableImage
               src={currentPage.processedImage}
               alt="Documento Procesado"
-              className="max-w-none max-h-none object-contain rounded-lg shadow-2xl transition-transform duration-200"
-              style={{ transform: `scale(${zoomLevel})` }}
-              referrerPolicy="no-referrer"
+              className="max-w-full max-h-full object-contain rounded-lg shadow-2xl"
             />
             {isProcessing && (
-              <div className="absolute inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center text-[#2979FF] rounded-lg">
+              <div className="absolute inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center text-[#2979FF] rounded-lg z-20">
                 <RefreshCw className="animate-spin" size={32} />
               </div>
             )}
-            {/* Controles de Zoom */}
-            <div className="absolute bottom-4 right-4 flex flex-col gap-2 z-30">
-              <button
-                onClick={() => setZoomLevel(Math.min(zoomLevel + 0.25, 3))}
-                className="p-2 bg-black/60 backdrop-blur-md rounded-lg text-white hover:bg-black/80 transition-colors"
-                title="Ampliar"
-              >
-                <ZoomIn size={20} />
-              </button>
-              <button
-                onClick={() => setZoomLevel(Math.max(zoomLevel - 0.25, 0.5))}
-                className="p-2 bg-black/60 backdrop-blur-md rounded-lg text-white hover:bg-black/80 transition-colors"
-                title="Reducir"
-              >
-                <ZoomOut size={20} />
-              </button>
-              <button
-                onClick={() => setZoomLevel(1)}
-                className="p-2 bg-black/60 backdrop-blur-md rounded-lg text-white hover:bg-black/80 transition-colors text-xs font-bold"
-                title="Restablecer zoom"
-              >
-                {Math.round(zoomLevel * 100)}%
-              </button>
-            </div>
           </div>
         )}
       </div>

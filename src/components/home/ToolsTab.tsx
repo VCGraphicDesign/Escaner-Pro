@@ -925,22 +925,11 @@ export default function ToolsTab({ onStartNewScan }: ToolsTabProps) {
 
               {/* Preview de la Imagen Procesada o Cargando */}
               <div className="border border-[#2C2C2E] rounded-2xl bg-neutral-950 p-2 overflow-hidden flex flex-col items-center justify-center relative min-h-[250px]">
-        <img
-          src={src}
-          alt={alt}
-          className={className}
-          style={{
-            transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})`,
-            transition: 'transform 0.1s ease-out',
-            transformOrigin: 'center center',
-            maxWidth: '100%',
-            maxHeight: '100%',
-            display: 'block',
-            // Prevent image dragging default behavior
-            userSelect: 'none',
-            pointerEvents: 'none',
-          }}
-        />
+                <ZoomableImage
+                  src={improvedImagePreview || selectedImage}
+                  alt="Imagen procesada"
+                  className="max-h-[40vh] max-w-full object-contain rounded-xl shadow-lg"
+                />
                 {isProcessingTool && (
                   <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center gap-2 text-[#2979FF]">
                     <RefreshCw className="animate-spin" size={28} />
