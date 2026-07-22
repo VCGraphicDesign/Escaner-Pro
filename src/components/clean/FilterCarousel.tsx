@@ -7,12 +7,12 @@ import React from 'react';
 import { Eye, Zap, Sparkles, Droplet, Moon } from 'lucide-react';
 
 interface FilterCarouselProps {
-  selectedFilter: 'original' | 'auto' | 'bw' | 'grayscale' | 'enhanced' | 'restore';
-  onChange: (filter: 'original' | 'auto' | 'bw' | 'grayscale' | 'enhanced' | 'restore') => void;
+  selectedFilter: 'original' | 'auto' | 'grayscale' | 'enhanced' | 'restore';
+  onChange: (filter: 'original' | 'auto' | 'grayscale' | 'enhanced' | 'restore') => void;
 }
 
 interface FilterItem {
-  id: 'original' | 'auto' | 'bw' | 'grayscale' | 'enhanced' | 'restore';
+  id: 'original' | 'auto' | 'grayscale' | 'enhanced' | 'restore';
   name: string;
   description: string;
   icon: React.ReactNode;
@@ -37,12 +37,6 @@ export default function FilterCarousel({ selectedFilter, onChange }: FilterCarou
       name: 'Auto-Mejora',
       description: 'Corrección inteligente',
       icon: <Sparkles size={18} />,
-    },
-    {
-      id: 'bw',
-      name: 'B y N Nítido',
-      description: 'Binarizado adaptativo',
-      icon: <Moon size={18} />,
     },
     {
       id: 'grayscale',

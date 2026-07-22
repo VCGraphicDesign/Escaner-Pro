@@ -4,19 +4,19 @@
  */
 
 import React, { useState, useRef, useEffect } from 'react';
-import { 
-  Wrench, 
-  ArrowLeft, 
-  AlertCircle, 
-  Crop, 
-  Eraser, 
-  Upload, 
-  Download, 
-  Save, 
-  Undo, 
-  Check, 
-  FolderOpen, 
-  ChevronRight, 
+import {
+  Wrench,
+  ArrowLeft,
+  AlertCircle,
+  Crop,
+  Eraser,
+  Upload,
+  Download,
+  Save,
+  Undo,
+  Check,
+  FolderOpen,
+  ChevronRight,
   Sparkles,
   FileText,
   Layers,
@@ -26,7 +26,8 @@ import {
   Sliders,
   Plus,
   RotateCcw,
-  Edit
+  Edit,
+  RefreshCw
 } from 'lucide-react';
 import { DocumentItem, ScannedPage, CropPoints } from '../../types';
 import { getDocuments, saveDocument, createDefaultAdjustments } from '../../services/documentStore';
@@ -75,10 +76,11 @@ export default function ToolsTab({ onStartNewScan }: ToolsTabProps) {
     brightness: 100,
     contrast: 110,
     sharpness: 50,
-    filter: 'auto' as 'original' | 'auto' | 'bw' | 'grayscale' | 'enhanced' | 'gamma',
+    filter: 'auto' as 'original' | 'auto' | 'grayscale' | 'enhanced' | 'gamma',
   });
   const [improving, setImproving] = useState(false);
   const [improvedImagePreview, setImprovedImagePreview] = useState<string | null>(null);
+  const [isProcessingTool, setIsProcessingTool] = useState(false);
 
   // Cargar documentos del local store para el selector
   useEffect(() => {
@@ -788,16 +790,6 @@ export default function ToolsTab({ onStartNewScan }: ToolsTabProps) {
                       }`}
                     >
                       Auto
-                    </button>
-                    <button
-                      onClick={() => setImprovementAdjustments(prev => ({ ...prev, filter: 'bw' }))}
-                      className={`py-1.5 px-1 text-[10px] font-bold rounded-lg border transition-all text-center ${
-                        improvementAdjustments.filter === 'bw' 
-                          ? 'bg-[#2979FF] border-[#2979FF] text-white' 
-                          : 'bg-neutral-900 border-[#2C2C2E] text-gray-400 hover:text-white'
-                      }`}
-                    >
-                      B&N
                     </button>
                     <button
                       onClick={() => setImprovementAdjustments(prev => ({ ...prev, filter: 'grayscale' }))}

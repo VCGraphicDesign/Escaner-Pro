@@ -31,7 +31,7 @@ export async function processPageImage(
     brightness: number;
     contrast: number;
     sharpness: number;
-    filter: 'original' | 'auto' | 'bw' | 'grayscale' | 'enhanced' | 'gamma' | 'restore';
+    filter: 'original' | 'auto' | 'grayscale' | 'enhanced' | 'gamma' | 'restore';
     rotation: number;
     crop: CropPoints | null;
   }
@@ -100,8 +100,6 @@ export async function processPageImage(
   // 4. Aplicar Filtros Avanzados
   if (adjustments.filter === 'grayscale') {
     applyGrayscale(canvas);
-  } else if (adjustments.filter === 'bw') {
-    applyAdaptiveThreshold(canvas);
   } else if (adjustments.filter === 'enhanced') {
     applyColorEnhancement(canvas);
   } else if (adjustments.filter === 'auto') {

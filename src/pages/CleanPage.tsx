@@ -4,11 +4,10 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Check, Sparkles, CopyCheck, RefreshCw, ChevronLeft, ChevronRight, Crop, Sliders, ZoomIn, ZoomOut } from 'lucide-react';
+import { ArrowLeft, Check, Sparkles, CopyCheck, RefreshCw, ChevronLeft, ChevronRight, Crop, ZoomIn, ZoomOut } from 'lucide-react';
 import { ScannedPage } from '../types';
 import { processPageImage } from '../services/imageProcessor';
 import FilterCarousel from '../components/clean/FilterCarousel';
-import AdjustmentSliders from '../components/clean/AdjustmentSliders';
 import CropTool from '../components/clean/CropTool';
 
 interface CleanPageProps {
@@ -17,7 +16,7 @@ interface CleanPageProps {
   onFinishCleaning: (cleanedPages: ScannedPage[]) => void;
 }
 
-type TabType = 'filtros' | 'ajustes' | 'recortar';
+type TabType = 'filtros' | 'recortar';
 
 export default function CleanPage({ capturedPages, onBack, onFinishCleaning }: CleanPageProps) {
   const [pages, setPages] = useState<ScannedPage[]>([]);
@@ -87,9 +86,6 @@ export default function CleanPage({ capturedPages, onBack, onFinishCleaning }: C
       clearTimeout(delay);
     };
   }, [
-    currentPage?.adjustments.brightness,
-    currentPage?.adjustments.contrast,
-    currentPage?.adjustments.sharpness,
     currentPage?.adjustments.filter,
     currentPage?.adjustments.rotation,
     currentPage?.adjustments.crop,
@@ -264,15 +260,6 @@ export default function CleanPage({ capturedPages, onBack, onFinishCleaning }: C
             Filtros
           </button>
           <button
-            onClick={() => setActiveTab('ajustes')}
-            className={`flex-1 py-3 text-xs font-bold transition-all flex items-center justify-center gap-1.5 border-b-2 ${
-              activeTab === 'ajustes' ? 'border-[#2979FF] text-[#2979FF]' : 'border-transparent text-gray-500 hover:text-gray-300'
-            }`}
-          >
-            <Sliders size={16} />
-            Ajustes
-          </button>
-          <button
             onClick={() => setActiveTab('recortar')}
             className={`flex-1 py-3 text-xs font-bold transition-all flex items-center justify-center gap-1.5 border-b-2 ${
               activeTab === 'recortar' ? 'border-[#2979FF] text-[#2979FF]' : 'border-transparent text-gray-500 hover:text-gray-300'
@@ -299,34 +286,6 @@ export default function CleanPage({ capturedPages, onBack, onFinishCleaning }: C
                 <CopyCheck size={14} className="text-[#2979FF]" />
                 Aplicar filtros a todas las páginas
               </button>
-            </div>
-          )}
-
-          {/* PESTAÑA: AJUSTES */}
-          {activeTab === 'ajustes' && (
-            <div className="flex flex-col h-full gap-4">
-              <AdjustmentSliders
-                brightness={currentPage.adjustments.brightness}
-                contrast={currentPage.adjustments.contrast}
-                sharpness={currentPage.adjustments.sharpness}
-                onBrightnessChange={(b) => updateAdjustment('brightness', b)}
-                onContrastChange={(c) => updateAdjustment('contrast', c)}
-                onSharpnessChange={(s) => updateAdjustment('sharpness', s)}
-              />
-              
-              <div className="flex justify-between items-center bg-[#2C2C2E] px-4 py-2.5 rounded-xl">
-                <span className="text-xs text-gray-300 font-medium">Rotación</span>
-                <button
-                  onClick={() => {
-                    const nextRotation = (currentPage.adjustments.rotation + 90) % 360;
-                    updateAdjustment('rotation', nextRotation);
-                  }}
-                  className="text-xs font-bold text-[#2979FF] flex items-center gap-1.5 bg-[#1C1C1E] px-3 py-1.5 rounded-lg border border-[#3C3C3E]"
-                >
-                  <RefreshCw size={12} />
-                  Girar 90°
-                </button>
-              </div>
             </div>
           )}
 
