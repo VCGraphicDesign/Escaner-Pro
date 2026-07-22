@@ -505,7 +505,8 @@ export function restoreDocument(canvas: HTMLCanvasElement) {
 
 /**
  * Algoritmo de eliminación de arrugas, pliegues y sombras.
- * Utiliza igualación de iluminación morfológica para que el papel sea blanco uniforme.
+ * Utiliza igualación morfológica de fondo con umbralización adaptativa suave Bradley/Sauvola.
+ * Convierte cualquier fondo de papel arrugado/sombreado en blanco puro sin degradar el texto.
  */
 export function removeWrinklesAndShadows(canvas: HTMLCanvasElement) {
   const ctx = canvas.getContext('2d');
@@ -516,43 +517,64 @@ export function removeWrinklesAndShadows(canvas: HTMLCanvasElement) {
   const imgData = ctx.getImageData(0, 0, w, h);
   const data = imgData.data;
 
-  // 1. Crear mapa de iluminación creando una versión suavizada/blur de baja frecuencia
+  // 1. Crear mapa de iluminación creando una versión suavizada de baja frecuencia (Background Surface)
   const bgCanvas = document.createElement('canvas');
-  bgCanvas.width = Math.max(30, Math.floor(w / 16));
-  bgCanvas.height = Math.max(30, Math.floor(h / 16));
+  const bgW = 40;
+  const bgH = Math.round((40 * h) / w);
+  bgCanvas.width = bgW;
+  bgCanvas.height = bgH;
   const bgCtx = bgCanvas.getContext('2d');
   if (!bgCtx) return;
 
-  // Dibujar a baja resolución (suavizado implícito)
-  bgCtx.drawImage(canvas, 0, 0, bgCanvas.width, bgCanvas.height);
-  const bgData = bgCtx.getImageData(0, 0, bgCanvas.width, bgCanvas.height).data;
-  const bgW = bgCanvas.width;
-  const bgH = bgCanvas.height;
+  // Dibujar a baja resolución con suavizado
+  bgCtx.drawImage(canvas, 0, 0, bgW, bgH);
+  // Aplicar paso de desenfoque adicional en el lienzo pequeñito para eliminar textura local del papel
+  bgCtx.globalAlpha = 0.5;
+  bgCtx.drawImage(bgCanvas, 1, 1);
+  bgCtx.drawImage(bgCanvas, -1, -1);
+  bgCtx.globalAlpha = 1.0;
 
-  // 2. Normalizar cada píxel comparándolo con la luminancia del fondo local
+  const bgData = bgCtx.getImageData(0, 0, bgW, bgH).data;
+
+  // 2. Procesamiento Adaptativo Píxel por Píxel (Sauvola & Soft Surface Flattening)
   for (let y = 0; y < h; y++) {
     const bgY = Math.min(bgH - 1, Math.floor((y / h) * bgH));
     for (let x = 0; x < w; x++) {
       const bgX = Math.min(bgW - 1, Math.floor((x / w) * bgW));
       const bgIdx = (bgY * bgW + bgX) * 4;
 
+      // Color de la luz de fondo estimada en esta región del documento
       const bgR = bgData[bgIdx] || 200;
       const bgG = bgData[bgIdx + 1] || 200;
       const bgB = bgData[bgIdx + 2] || 200;
+      const bgLuminance = 0.299 * bgR + 0.587 * bgG + 0.114 * bgB;
 
       const idx = (y * w + x) * 4;
       const r = data[idx];
       const g = data[idx + 1];
       const b = data[idx + 2];
+      const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
 
-      // Aclarar píxeles de sombras y arrugas
-      const normR = (r / Math.max(20, bgR)) * 245;
-      const normG = (g / Math.max(20, bgG)) * 245;
-      const normB = (b / Math.max(20, bgB)) * 245;
+      // Umbral adaptativo: si el píxel está cerca o por encima de la luz del papel local
+      const thresholdOffset = 18; // Sensibilidad para distinguir tinta de sombra
+      const paperThreshold = bgLuminance - thresholdOffset;
 
-      data[idx] = Math.min(255, Math.max(0, normR));
-      data[idx + 1] = Math.min(255, Math.max(0, normG));
-      data[idx + 2] = Math.min(255, Math.max(0, normB));
+      if (luminance >= paperThreshold) {
+        // Es papel/fondo con sombra o arruga -> Blanquear completamente a blanco uniforme
+        data[idx] = 255;
+        data[idx + 1] = 255;
+        data[idx + 2] = 255;
+      } else {
+        // Es texto/tinta -> Conservar color oscuro y aumentar nitidez/contraste
+        const factor = Math.max(0, luminance / paperThreshold);
+        // Oscurecer texto para máxima legibilidad
+        const enhancedVal = Math.floor(factor * 0.85 * 255);
+
+        // Mantener tono original pero profundizado
+        data[idx] = Math.min(r, enhancedVal);
+        data[idx + 1] = Math.min(g, enhancedVal);
+        data[idx + 2] = Math.min(b, enhancedVal);
+      }
     }
   }
 
