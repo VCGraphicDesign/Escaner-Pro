@@ -121,7 +121,7 @@ export async function processPageImage(
   try {
     const coeffs = await predictWarp(canvas.toDataURL('image/jpeg', 0.85));
     console.log('Dewarp coefficients:', coeffs);
-    // TODO: aplicar transformación geométrica usando los coeficientes
+    await applyDewarp(canvas, coeffs);
   } catch (e) {
     console.warn('Modelo de dewarp no disponible:', e);
   }
@@ -670,4 +670,40 @@ export function removePunchHoles(canvas: HTMLCanvasElement) {
   checkRegionForHoles(w - marginWidth, w - 2);
 
   ctx.putImageData(imgData, 0, 0);
+}
+
+export async function applyDewarp(canvas: HTMLCanvasElement, coeffs: number[]): Promise<void> {
+  // Simple implementation using the first 6 coefficients as an affine matrix.
+  // coeffs expected: [a, b, c, d, e, f, _, _]
+  // a, b, c, d correspond to scaling/rotation/shear, e, f are translation.
+  const [a, b, c, d, e, f] = coeffs;
+  const w = canvas.width;
+  const h = canvas.height;
+
+  // Create a temporary canvas to draw the transformed image.
+  const tempCanvas = document.createElement('canvas');
+  tempCanvas.width = w;
+  tempCanvas.height = h;
+  const tempCtx = tempCanvas.getContext('2d');
+  if (!tempCtx) return;
+
+  // Load the current canvas content as an image.
+  const img = new Image();
+  img.src = canvas.toDataURL();
+  await new Promise((resolve, reject) => {
+    img.onload = resolve as any;
+    img.onerror = reject as any;
+  });
+
+  // Apply the affine transform and draw.
+  tempCtx.setTransform(a, b, c, d, e, f);
+  tempCtx.drawImage(img, 0, 0);
+
+  // Copy the transformed image back to the original canvas.
+  const originalCtx = canvas.getContext('2d');
+  if (!originalCtx) return;
+  originalCtx.clearRect(0, 0, w, h);
+  originalCtx.drawImage(tempCanvas, 0, 0);
+
+  console.log('applyDewarp applied with coeffs', coeffs);
 }
