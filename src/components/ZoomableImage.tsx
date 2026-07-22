@@ -46,6 +46,27 @@ export const ZoomableImage: React.FC<ZoomableImageProps> = ({ src, alt = '', cla
     return () => el.removeEventListener('touchmove', prevent);
   }, []);
 
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
+
+  // Mouse / pointer drag for panning when zoomed
+  const handlePointerDown = (e: React.PointerEvent) => {
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    setDragStart({ x: e.clientX, y: e.clientY });
+  };
+  const handlePointerMove = (e: React.PointerEvent) => {
+    if (dragStart) {
+      const dx = e.clientX - dragStart.x;
+      const dy = e.clientY - dragStart.y;
+      setOffset(prev => ({ x: prev.x + dx, y: prev.y + dy }));
+      setDragStart({ x: e.clientX, y: e.clientY });
+    }
+  };
+  const handlePointerUp = (e: React.PointerEvent) => {
+    (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+    setDragStart(null);
+  };
+
   return (
     <div
       ref={containerRef}
@@ -53,16 +74,35 @@ export const ZoomableImage: React.FC<ZoomableImageProps> = ({ src, alt = '', cla
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
       onTouchCancel={handleTouchEnd}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
       style={{
         overflow: 'hidden',
         touchAction: 'none',
         display: 'inline-block',
-        transform: `scale(${scale})`,
-        transition: 'transform 0.1s ease-out',
-        transformOrigin: 'center center',
+        width: '100%',
+        height: '100%',
+        position: 'relative',
+        // Use transform on the image instead of container to avoid clipping size limits
       }}
     >
-      <img src={src} alt={alt} className={className} />
+      <img
+        src={src}
+        alt={alt}
+        className={className}
+        style={{
+          transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})`,
+          transition: 'transform 0.1s ease-out',
+          transformOrigin: 'center center',
+          width: '100%',
+          height: 'auto',
+          display: 'block',
+          // Prevent image dragging default behavior
+          userSelect: 'none',
+          pointerEvents: 'none',
+        }}
+      />
     </div>
   );
 };
