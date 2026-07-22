@@ -4,6 +4,7 @@
  */
 
 import { CropPoints } from '../types';
+import { predictWarp } from './dewarpModel';
 
 /**
  * Service to process images using HTML5 Canvas API in real-time, 100% offline.
@@ -114,6 +115,15 @@ export async function processPageImage(
   // 5. Aplicar Nitidez (Sharpness) si es mayor a cero
   if (adjustments.sharpness > 0) {
     applySharpness(canvas, adjustments.sharpness / 100);
+  }
+
+  // 6. Aplicar modelo de dewarp basado en DocUNet‑lite (si está disponible)
+  try {
+    const coeffs = await predictWarp(canvas.toDataURL('image/jpeg', 0.85));
+    console.log('Dewarp coefficients:', coeffs);
+    // TODO: aplicar transformación geométrica usando los coeficientes
+  } catch (e) {
+    console.warn('Modelo de dewarp no disponible:', e);
   }
 
   return canvas.toDataURL('image/jpeg', 0.85);
