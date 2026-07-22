@@ -6,7 +6,7 @@
 import React, { useState, useEffect } from 'react';
 import { ArrowLeft, Check, Sparkles, CopyCheck, RefreshCw, ChevronLeft, ChevronRight, Crop, ZoomIn, ZoomOut } from 'lucide-react';
 import { ScannedPage } from '../types';
-import { processPageImage } from '../services/imageProcessor';
+import { processPageImage, detectDocumentCorners } from '../services/imageProcessor';
 import FilterCarousel from '../components/clean/FilterCarousel';
 import CropTool from '../components/clean/CropTool';
 import { ZoomableImage } from '../components/ZoomableImage';
@@ -26,20 +26,43 @@ export default function CleanPage({ capturedPages, onBack, onFinishCleaning }: C
   const [activeTab, setActiveTab] = useState<TabType>('filtros');
   const [zoomLevel, setZoomLevel] = useState(1);
 
-  // Inicializar páginas con puntos de recorte predeterminados si no tienen
+  // Inicializar páginas y detectar bordes del documento automáticamente
   useEffect(() => {
-    const initialized = capturedPages.map((page) => {
-      if (!page.adjustments.crop) {
-        page.adjustments.crop = {
-          topLeft: { x: 0.05, y: 0.05 },
-          topRight: { x: 0.95, y: 0.05 },
-          bottomLeft: { x: 0.05, y: 0.95 },
-          bottomRight: { x: 0.95, y: 0.95 },
-        };
-      }
-      return page;
-    });
-    setPages(initialized);
+    let cancelled = false;
+
+    const initPages = async () => {
+      const initialized = await Promise.all(
+        capturedPages.map(async (page) => {
+          // Si ya tiene puntos de recorte, no los sobreescribimos
+          if (page.adjustments.crop) return page;
+          try {
+            // Detectar los bordes/esquinas del documento automáticamente
+            const detectedCrop = await detectDocumentCorners(page.originalImage);
+            return {
+              ...page,
+              adjustments: { ...page.adjustments, crop: detectedCrop },
+            };
+          } catch {
+            return {
+              ...page,
+              adjustments: {
+                ...page.adjustments,
+                crop: {
+                  topLeft: { x: 0.05, y: 0.05 },
+                  topRight: { x: 0.95, y: 0.05 },
+                  bottomLeft: { x: 0.05, y: 0.95 },
+                  bottomRight: { x: 0.95, y: 0.95 },
+                },
+              },
+            };
+          }
+        })
+      );
+      if (!cancelled) setPages(initialized);
+    };
+
+    initPages();
+    return () => { cancelled = true; };
   }, [capturedPages]);
 
   const currentPage = pages[currentIndex];

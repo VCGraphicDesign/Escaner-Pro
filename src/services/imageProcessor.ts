@@ -707,3 +707,127 @@ export async function applyDewarp(canvas: HTMLCanvasElement, coeffs: number[]): 
 
   console.log('applyDewarp applied with coeffs', coeffs);
 }
+
+/**
+ * Detección automática de los bordes/esquinas del documento (estilo CamScanner).
+ * Analiza el contraste entre la hoja de papel y el fondo (ej. mesa)
+ * para calcular la mejor caja cuadrilátera de corte.
+ */
+export async function detectDocumentCorners(originalBase64: string): Promise<CropPoints> {
+  const defaultCrop: CropPoints = {
+    topLeft: { x: 0.05, y: 0.05 },
+    topRight: { x: 0.95, y: 0.05 },
+    bottomLeft: { x: 0.05, y: 0.95 },
+    bottomRight: { x: 0.95, y: 0.95 },
+  };
+
+  try {
+    const img = await loadImage(originalBase64);
+    const canvas = document.createElement('canvas');
+    const targetDim = 250;
+    const scale = Math.min(1, targetDim / Math.max(img.naturalWidth, img.naturalHeight));
+    const w = Math.max(50, Math.round(img.naturalWidth * scale));
+    const h = Math.max(50, Math.round(img.naturalHeight * scale));
+    canvas.width = w;
+    canvas.height = h;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return defaultCrop;
+
+    ctx.drawImage(img, 0, 0, w, h);
+    const imgData = ctx.getImageData(0, 0, w, h);
+    const data = imgData.data;
+
+    // Convertir a escala de grises
+    const gray = new Uint8Array(w * h);
+    for (let i = 0; i < data.length; i += 4) {
+      gray[i / 4] = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
+    }
+
+    let topY = 0.05;
+    let bottomY = 0.95;
+    let leftX = 0.05;
+    let rightX = 0.95;
+
+    // Búsqueda del borde superior (0 -> h*0.42)
+    let maxGradTop = 0;
+    for (let y = 3; y < Math.floor(h * 0.42); y++) {
+      let gradSum = 0;
+      for (let x = Math.floor(w * 0.2); x < w * 0.8; x += 3) {
+        const curr = gray[y * w + x];
+        const next = gray[(y + 3) * w + x];
+        gradSum += Math.abs(next - curr);
+      }
+      if (gradSum > maxGradTop) {
+        maxGradTop = gradSum;
+        topY = y / h;
+      }
+    }
+
+    // Búsqueda del borde inferior (h -> h*0.58)
+    let maxGradBottom = 0;
+    for (let y = h - 4; y > Math.floor(h * 0.58); y--) {
+      let gradSum = 0;
+      for (let x = Math.floor(w * 0.2); x < w * 0.8; x += 3) {
+        const curr = gray[y * w + x];
+        const prev = gray[(y - 3) * w + x];
+        gradSum += Math.abs(prev - curr);
+      }
+      if (gradSum > maxGradBottom) {
+        maxGradBottom = gradSum;
+        bottomY = y / h;
+      }
+    }
+
+    // Búsqueda del borde izquierdo (0 -> w*0.42)
+    let maxGradLeft = 0;
+    for (let x = 3; x < Math.floor(w * 0.42); x++) {
+      let gradSum = 0;
+      for (let y = Math.floor(h * 0.2); y < h * 0.8; y += 3) {
+        const curr = gray[y * w + x];
+        const next = gray[y * w + (x + 3)];
+        gradSum += Math.abs(next - curr);
+      }
+      if (gradSum > maxGradLeft) {
+        maxGradLeft = gradSum;
+        leftX = x / w;
+      }
+    }
+
+    // Búsqueda del borde derecho (w -> w*0.58)
+    let maxGradRight = 0;
+    for (let x = w - 4; x > Math.floor(w * 0.58); x--) {
+      let gradSum = 0;
+      for (let y = Math.floor(h * 0.2); y < h * 0.8; y += 3) {
+        const curr = gray[y * w + x];
+        const prev = gray[y * w + (x - 3)];
+        gradSum += Math.abs(prev - curr);
+      }
+      if (gradSum > maxGradRight) {
+        maxGradRight = gradSum;
+        rightX = x / w;
+      }
+    }
+
+    // Limitar márgenes de seguridad para evitar que las esquinas estén demasiado juntas
+    if (bottomY - topY < 0.25) {
+      topY = 0.05;
+      bottomY = 0.95;
+    }
+    if (rightX - leftX < 0.25) {
+      leftX = 0.05;
+      rightX = 0.95;
+    }
+
+    return {
+      topLeft: { x: Number(leftX.toFixed(3)), y: Number(topY.toFixed(3)) },
+      topRight: { x: Number(rightX.toFixed(3)), y: Number(topY.toFixed(3)) },
+      bottomLeft: { x: Number(leftX.toFixed(3)), y: Number(bottomY.toFixed(3)) },
+      bottomRight: { x: Number(rightX.toFixed(3)), y: Number(bottomY.toFixed(3)) },
+    };
+  } catch (err) {
+    console.warn('Error detectando esquinas automáticamente:', err);
+    return defaultCrop;
+  }
+}
+
