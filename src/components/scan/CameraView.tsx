@@ -47,14 +47,24 @@ export default function CameraView({ onBack, onPagesCaptured }: CameraViewProps)
         stream.getTracks().forEach((track) => track.stop());
       }
 
-      const mediaStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
-        audio: false,
-      });
+      let mediaStream: MediaStream;
+      try {
+        mediaStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+          audio: false,
+        });
+      } catch (e) {
+        // Fallback para cámaras o dispositivos que no soportan restricciones estrictas
+        mediaStream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: false,
+        });
+      }
 
       setStream(mediaStream);
       if (videoRef.current) {
         videoRef.current.srcObject = mediaStream;
+        videoRef.current.play().catch((e) => console.log('Autoplay play error:', e));
       }
       setCameraActive(true);
     } catch (err: any) {
@@ -230,6 +240,7 @@ export default function CameraView({ onBack, onPagesCaptured }: CameraViewProps)
               ref={videoRef}
               autoPlay
               playsInline
+              muted
               className="w-full h-full object-cover"
             />
             {/* Guía de encuadre de documento */}
