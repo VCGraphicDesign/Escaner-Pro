@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useRef, useEffect } from 'react';
+import { ZoomableImage } from '../ZoomableImage';
 import {
   Wrench,
   ArrowLeft,
@@ -749,18 +750,16 @@ export default function ToolsTab({ onStartNewScan }: ToolsTabProps) {
                   </div>
                 )}
                 {improvedImagePreview ? (
-                  <img
+                  <ZoomableImage
                     src={improvedImagePreview}
                     alt="Previsualización mejorada"
                     className="max-h-[40vh] object-contain rounded-xl shadow-lg"
-                    referrerPolicy="no-referrer"
                   />
                 ) : (
-                  <img
+                  <ZoomableImage
                     src={selectedImage}
                     alt="Original"
                     className="max-h-[40vh] object-contain rounded-xl shadow-lg"
-                    referrerPolicy="no-referrer"
                   />
                 )}
               </div>
