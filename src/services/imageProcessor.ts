@@ -709,285 +709,9 @@ export async function applyDewarp(canvas: HTMLCanvasElement, coeffs: number[]): 
 }
 
 /**
- * Aplica Filtro Gaussiano para reducir ruido.
- * @param canvas Canvas de entrada
- * @param radius Radio del kernel (típicamente 1-3)
- */
-function applyGaussianBlur(canvas: HTMLCanvasElement, radius: number = 1): void {
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return;
-
-  const w = canvas.width;
-  const h = canvas.height;
-  const imgData = ctx.getImageData(0, 0, w, h);
-  const data = imgData.data;
-  const output = new Uint8ClampedArray(data);
-
-  const sigma = radius / 2;
-  const kernelSize = Math.ceil(6 * sigma);
-  const kernel: number[] = [];
-
-  // Generar kernel Gaussiano
-  let sum = 0;
-  for (let i = -kernelSize; i <= kernelSize; i++) {
-    const val = Math.exp(-((i * i) / (2 * sigma * sigma))) / (Math.sqrt(2 * Math.PI) * sigma);
-    kernel.push(val);
-    sum += val;
-  }
-
-  // Normalizar kernel
-  for (let i = 0; i < kernel.length; i++) {
-    kernel[i] /= sum;
-  }
-
-  const halfKernel = Math.floor(kernel.length / 2);
-
-  // Aplicar blur horizontal
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      let r = 0, g = 0, b = 0;
-      for (let i = 0; i < kernel.length; i++) {
-        const xx = Math.min(w - 1, Math.max(0, x + i - halfKernel));
-        const idx = (y * w + xx) * 4;
-        r += data[idx] * kernel[i];
-        g += data[idx + 1] * kernel[i];
-        b += data[idx + 2] * kernel[i];
-      }
-      const outIdx = (y * w + x) * 4;
-      output[outIdx] = r;
-      output[outIdx + 1] = g;
-      output[outIdx + 2] = b;
-    }
-  }
-
-  // Copiar resultado intermedio
-  data.set(output);
-  ctx.putImageData(imgData, 0, 0);
-}
-
-/**
- * Aplica Canny Edge Detection para detectar bordes del documento.
- * @param canvas Canvas con la imagen en escala de grises
- * @returns Canvas con bordes detectados
- */
-function applySobel(canvas: HTMLCanvasElement): Uint8Array {
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return new Uint8Array();
-
-  const w = canvas.width;
-  const h = canvas.height;
-  const imgData = ctx.getImageData(0, 0, w, h);
-  const data = imgData.data;
-  const edges = new Uint8Array(w * h);
-
-  // Kernels de Sobel
-  const sobelX = [-1, 0, 1, -2, 0, 2, -1, 0, 1];
-  const sobelY = [-1, -2, -1, 0, 0, 0, 1, 2, 1];
-
-  for (let y = 1; y < h - 1; y++) {
-    for (let x = 1; x < w - 1; x++) {
-      let gx = 0, gy = 0;
-
-      for (let ky = -1; ky <= 1; ky++) {
-        for (let kx = -1; kx <= 1; kx++) {
-          const idx = ((y + ky) * w + (x + kx)) * 4;
-          const gray = data[idx]; // Ya está en escala de grises
-          gx += gray * sobelX[(ky + 1) * 3 + (kx + 1)];
-          gy += gray * sobelY[(ky + 1) * 3 + (kx + 1)];
-        }
-      }
-
-      const magnitude = Math.sqrt(gx * gx + gy * gy);
-      edges[y * w + x] = Math.min(255, magnitude);
-    }
-  }
-
-  return edges;
-}
-
-/**
- * Umbralización binaria simple.
- * @param edges Array de bordes
- * @param threshold Valor umbral (0-255)
- * @returns Array binario
- */
-function threshold(edges: Uint8Array, threshold: number): Uint8Array {
-  const binary = new Uint8Array(edges.length);
-  for (let i = 0; i < edges.length; i++) {
-    binary[i] = edges[i] > threshold ? 255 : 0;
-  }
-  return binary;
-}
-
-/**
- * Encontrar contornos usando flood fill / análisis conectado.
- * Retorna lista de contornos (cada contorno es un array de puntos).
- */
-function findContours(binary: Uint8Array, width: number, height: number): Array<Array<{ x: number; y: number }>> {
-  const visited = new Uint8Array(binary.length);
-  const contours: Array<Array<{ x: number; y: number }>> = [];
-
-  for (let i = 0; i < binary.length; i++) {
-    if (binary[i] > 0 && !visited[i]) {
-      const y = Math.floor(i / width);
-      const x = i % width;
-      const contour = traceContour(binary, width, height, x, y, visited);
-      if (contour.length > 10) { // Filtrar contornos muy pequeños
-        contours.push(contour);
-      }
-    }
-  }
-
-  return contours;
-}
-
-/**
- * Traza un contorno usando vecindad 8-conectada.
- */
-function traceContour(
-  binary: Uint8Array,
-  width: number,
-  height: number,
-  startX: number,
-  startY: number,
-  visited: Uint8Array
-): Array<{ x: number; y: number }> {
-  const contour: Array<{ x: number; y: number }> = [];
-  const stack = [{ x: startX, y: startY }];
-
-  const directions = [
-    { dx: 0, dy: -1 },
-    { dx: 1, dy: -1 },
-    { dx: 1, dy: 0 },
-    { dx: 1, dy: 1 },
-    { dx: 0, dy: 1 },
-    { dx: -1, dy: 1 },
-    { dx: -1, dy: 0 },
-    { dx: -1, dy: -1 },
-  ];
-
-  while (stack.length > 0) {
-    const point = stack.pop();
-    if (!point) break;
-
-    const idx = point.y * width + point.x;
-    if (visited[idx]) continue;
-
-    visited[idx] = 1;
-    contour.push(point);
-
-    for (const dir of directions) {
-      const nx = point.x + dir.dx;
-      const ny = point.y + dir.dy;
-
-      if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
-        const nIdx = ny * width + nx;
-        if (binary[nIdx] > 0 && !visited[nIdx]) {
-          stack.push({ x: nx, y: ny });
-        }
-      }
-    }
-  }
-
-  return contour;
-}
-
-/**
- * Algoritmo Douglas-Peucker para simplificar un contorno a un polígono.
- * @param contour Array de puntos del contorno
- * @param epsilon Tolerancia de aproximación
- * @returns Array simplificado de puntos
- */
-function douglasPeucker(
-  contour: Array<{ x: number; y: number }>,
-  epsilon: number
-): Array<{ x: number; y: number }> {
-  if (contour.length < 3) return contour;
-
-  let maxDist = 0;
-  let maxIdx = 0;
-
-  // Encontrar el punto más lejano de la línea entre el primer y último punto
-  const start = contour[0];
-  const end = contour[contour.length - 1];
-
-  for (let i = 1; i < contour.length - 1; i++) {
-    const dist = pointToLineDistance(contour[i], start, end);
-    if (dist > maxDist) {
-      maxDist = dist;
-      maxIdx = i;
-    }
-  }
-
-  if (maxDist > epsilon) {
-    const left = douglasPeucker(contour.slice(0, maxIdx + 1), epsilon);
-    const right = douglasPeucker(contour.slice(maxIdx), epsilon);
-    return left.slice(0, -1).concat(right);
-  } else {
-    return [start, end];
-  }
-}
-
-/**
- * Calcula la distancia perpendicular de un punto a una línea.
- */
-function pointToLineDistance(
-  point: { x: number; y: number },
-  lineStart: { x: number; y: number },
-  lineEnd: { x: number; y: number }
-): number {
-  const num = Math.abs(
-    (lineEnd.y - lineStart.y) * point.x -
-    (lineEnd.x - lineStart.x) * point.y +
-    lineEnd.x * lineStart.y -
-    lineEnd.y * lineStart.x
-  );
-  const den = Math.sqrt(
-    (lineEnd.y - lineStart.y) ** 2 +
-    (lineEnd.x - lineStart.x) ** 2
-  );
-  return den === 0 ? num : num / den;
-}
-
-/**
- * Calcula el área de un polígono usando la fórmula de Shoelace.
- */
-function polygonArea(polygon: Array<{ x: number; y: number }>): number {
-  let area = 0;
-  for (let i = 0; i < polygon.length; i++) {
-    const p1 = polygon[i];
-    const p2 = polygon[(i + 1) % polygon.length];
-    area += p1.x * p2.y - p2.x * p1.y;
-  }
-  return Math.abs(area) / 2;
-}
-
-/**
- * Ordena los 4 puntos de esquina en el orden: TL, TR, BR, BL.
- */
-function orderCornerPoints(
-  points: Array<{ x: number; y: number }>
-): Array<{ x: number; y: number }> {
-  if (points.length !== 4) return points;
-
-  // Calcular el centroide
-  const cx = points.reduce((sum, p) => sum + p.x, 0) / 4;
-  const cy = points.reduce((sum, p) => sum + p.y, 0) / 4;
-
-  // Ordenar por ángulo respecto al centroide
-  points.sort((a, b) => {
-    const angleA = Math.atan2(a.y - cy, a.x - cx);
-    const angleB = Math.atan2(b.y - cy, b.x - cx);
-    return angleA - angleB;
-  });
-
-  return points;
-}
-
-/**
- * Detección automática mejorada de los bordes/esquinas del documento (estilo CamScanner).
- * Utiliza Canny Edge Detection + Contour Detection + Douglas-Peucker Algorithm.
- * Detecta automáticamente las 4 esquinas del documento con alta precisión.
+ * Detección automática mejorada de los bordes/esquinas del documento.
+ * Prioriza por CONTRASTE + ubicación CENTRAL en lugar de tamaño.
+ * Ideal para detectar documentos intuitivamente: ticket pequeño sobre libreta, etc.
  */
 export async function detectDocumentCorners(originalBase64: string): Promise<CropPoints> {
   const defaultCrop: CropPoints = {
@@ -1001,8 +725,8 @@ export async function detectDocumentCorners(originalBase64: string): Promise<Cro
     const img = await loadImage(originalBase64);
     const canvas = document.createElement('canvas');
     
-    // Usar resolución óptima para detección rápida pero precisa
-    const targetDim = 400;
+    // Usar resolución óptima para detección rápida
+    const targetDim = 300;
     const scale = Math.min(1, targetDim / Math.max(img.naturalWidth, img.naturalHeight));
     const w = Math.max(50, Math.round(img.naturalWidth * scale));
     const h = Math.max(50, Math.round(img.naturalHeight * scale));
@@ -1015,83 +739,98 @@ export async function detectDocumentCorners(originalBase64: string): Promise<Cro
 
     // Dibujar imagen y convertir a escala de grises
     ctx.drawImage(img, 0, 0, w, h);
-    let imgData = ctx.getImageData(0, 0, w, h);
-    let data = imgData.data;
+    const imgData = ctx.getImageData(0, 0, w, h);
+    const data = imgData.data;
 
     // Paso 1: Convertir a escala de grises
+    const gray = new Uint8Array(w * h);
     for (let i = 0; i < data.length; i += 4) {
-      const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-      data[i] = gray;
-      data[i + 1] = gray;
-      data[i + 2] = gray;
-    }
-    ctx.putImageData(imgData, 0, 0);
-
-    // Paso 2: Aplicar Gaussian Blur para reducir ruido
-    applyGaussianBlur(canvas, 2);
-
-    // Paso 3: Aplicar Sobel Edge Detection
-    const edges = applySobel(canvas);
-
-    // Paso 4: Umbralizar los bordes (binarizar)
-    const threshold_value = 100;
-    const binary = threshold(edges, threshold_value);
-
-    // Paso 5: Encontrar contornos
-    const contours = findContours(binary, w, h);
-
-    if (contours.length === 0) {
-      console.warn('No contours found, using default crop');
-      return defaultCrop;
+      gray[i / 4] = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
     }
 
-    // Paso 6: Filtrar contornos válidos (grandes, similares a documentos)
-    let bestQuadrilateral: Array<{ x: number; y: number }> | null = null;
-    let bestArea = 0;
+    // Paso 2: Detectar bordes usando Sobel (más simple y rápido que Canny para este caso)
+    const edges = detectEdgesSobel(gray, w, h);
 
-    for (const contour of contours) {
-      // Simplificar contorno usando Douglas-Peucker
-      const epsilon = 0.02 * contour.length;
-      const simplified = douglasPeucker(contour, epsilon);
+    // Paso 3: Encontrar candidatos de bordes del documento
+    // Buscar los puntos de mayor contraste en 4 direcciones desde el centro
+    const centerX = w / 2;
+    const centerY = h / 2;
+    const margin = 0.1; // 10% de margen desde los bordes
 
-      // Buscar un cuadrilátero (4 puntos)
-      if (simplified.length === 4) {
-        const area = polygonArea(simplified);
-        const minArea = (w * h) * 0.1; // Mínimo 10% del área total
-        const maxArea = (w * h) * 0.95; // Máximo 95% del área total
+    let topY = Math.floor(h * margin);
+    let bottomY = Math.floor(h * (1 - margin));
+    let leftX = Math.floor(w * margin);
+    let rightX = Math.floor(w * (1 - margin));
 
-        if (area > minArea && area < maxArea && area > bestArea) {
-          bestQuadrilateral = simplified;
-          bestArea = area;
-        }
+    // Buscar borde superior (máximo contraste vertical)
+    let maxContrastTop = 0;
+    for (let y = Math.floor(h * margin); y < Math.floor(h * 0.4); y++) {
+      let contrast = 0;
+      for (let x = Math.floor(w * 0.2); x < Math.floor(w * 0.8); x += 2) {
+        contrast += edges[y * w + x];
+      }
+      if (contrast > maxContrastTop) {
+        maxContrastTop = contrast;
+        topY = y;
       }
     }
 
-    if (!bestQuadrilateral) {
-      console.warn('No valid quadrilateral found, using default crop');
+    // Buscar borde inferior
+    let maxContrastBottom = 0;
+    for (let y = Math.floor(h * 0.6); y < Math.floor(h * (1 - margin)); y++) {
+      let contrast = 0;
+      for (let x = Math.floor(w * 0.2); x < Math.floor(w * 0.8); x += 2) {
+        contrast += edges[y * w + x];
+      }
+      if (contrast > maxContrastBottom) {
+        maxContrastBottom = contrast;
+        bottomY = y;
+      }
+    }
+
+    // Buscar borde izquierdo
+    let maxContrastLeft = 0;
+    for (let x = Math.floor(w * margin); x < Math.floor(w * 0.4); x++) {
+      let contrast = 0;
+      for (let y = Math.floor(h * 0.2); y < Math.floor(h * 0.8); y += 2) {
+        contrast += edges[y * w + x];
+      }
+      if (contrast > maxContrastLeft) {
+        maxContrastLeft = contrast;
+        leftX = x;
+      }
+    }
+
+    // Buscar borde derecho
+    let maxContrastRight = 0;
+    for (let x = Math.floor(w * 0.6); x < Math.floor(w * (1 - margin)); x++) {
+      let contrast = 0;
+      for (let y = Math.floor(h * 0.2); y < Math.floor(h * 0.8); y += 2) {
+        contrast += edges[y * w + x];
+      }
+      if (contrast > maxContrastRight) {
+        maxContrastRight = contrast;
+        rightX = x;
+      }
+    }
+
+    // Paso 4: Validar que tenemos dimensiones sensatas
+    const detectedWidth = rightX - leftX;
+    const detectedHeight = bottomY - topY;
+    const minSize = Math.min(w, h) * 0.15; // Mínimo 15% del ancho/alto
+
+    if (detectedWidth < minSize || detectedHeight < minSize) {
+      console.warn('Detected document too small, using default crop');
       return defaultCrop;
     }
 
-    // Paso 7: Ordenar puntos correctamente (TL, TR, BR, BL)
-    bestQuadrilateral = orderCornerPoints(bestQuadrilateral);
-
-    // Paso 8: Convertir de píxeles a coordenadas relativas (0-1)
+    // Paso 5: Convertir a coordenadas relativas (0-1)
     const crop: CropPoints = {
-      topLeft: { x: Math.max(0, Math.min(1, bestQuadrilateral[0].x / w)), y: Math.max(0, Math.min(1, bestQuadrilateral[0].y / h)) },
-      topRight: { x: Math.max(0, Math.min(1, bestQuadrilateral[1].x / w)), y: Math.max(0, Math.min(1, bestQuadrilateral[1].y / h)) },
-      bottomRight: { x: Math.max(0, Math.min(1, bestQuadrilateral[2].x / w)), y: Math.max(0, Math.min(1, bestQuadrilateral[2].y / h)) },
-      bottomLeft: { x: Math.max(0, Math.min(1, bestQuadrilateral[3].x / w)), y: Math.max(0, Math.min(1, bestQuadrilateral[3].y / h)) },
+      topLeft: { x: Number((leftX / w).toFixed(3)), y: Number((topY / h).toFixed(3)) },
+      topRight: { x: Number((rightX / w).toFixed(3)), y: Number((topY / h).toFixed(3)) },
+      bottomLeft: { x: Number((leftX / w).toFixed(3)), y: Number((bottomY / h).toFixed(3)) },
+      bottomRight: { x: Number((rightX / w).toFixed(3)), y: Number((bottomY / h).toFixed(3)) },
     };
-
-    // Validar que los puntos sean sensatos (no estén demasiado juntos)
-    const minSpacing = 0.15;
-    if (
-      Math.abs(crop.topRight.x - crop.topLeft.x) < minSpacing ||
-      Math.abs(crop.bottomLeft.y - crop.topLeft.y) < minSpacing
-    ) {
-      console.warn('Detected corners too close, using default crop');
-      return defaultCrop;
-    }
 
     console.log('Document corners detected:', crop);
     return crop;
@@ -1099,4 +838,36 @@ export async function detectDocumentCorners(originalBase64: string): Promise<Cro
     console.warn('Error detectando esquinas automáticamente:', err);
     return defaultCrop;
   }
+}
+
+/**
+ * Detecta bordes usando operador Sobel (simple y rápido).
+ * Retorna un mapa de magnitudes de borde.
+ */
+function detectEdgesSobel(gray: Uint8Array, w: number, h: number): Uint8Array {
+  const edges = new Uint8Array(w * h);
+
+  // Kernels de Sobel
+  const sobelX = [-1, 0, 1, -2, 0, 2, -1, 0, 1];
+  const sobelY = [-1, -2, -1, 0, 0, 0, 1, 2, 1];
+
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      let gx = 0, gy = 0;
+
+      for (let ky = -1; ky <= 1; ky++) {
+        for (let kx = -1; kx <= 1; kx++) {
+          const idx = (y + ky) * w + (x + kx);
+          const val = gray[idx];
+          gx += val * sobelX[(ky + 1) * 3 + (kx + 1)];
+          gy += val * sobelY[(ky + 1) * 3 + (kx + 1)];
+        }
+      }
+
+      const magnitude = Math.sqrt(gx * gx + gy * gy);
+      edges[y * w + x] = Math.min(255, magnitude);
+    }
+  }
+
+  return edges;
 }
