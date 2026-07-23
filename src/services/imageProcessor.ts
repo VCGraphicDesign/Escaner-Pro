@@ -751,66 +751,86 @@ export async function detectDocumentCorners(originalBase64: string): Promise<Cro
     // Paso 2: Detectar bordes usando Sobel (más simple y rápido que Canny para este caso)
     const edges = detectEdgesSobel(gray, w, h);
 
-    // Paso 3: Encontrar candidatos de bordes del documento
-    // Buscar los puntos de mayor contraste en 4 direcciones desde el centro
-    const centerX = w / 2;
-    const centerY = h / 2;
-    const margin = 0.1; // 10% de margen desde los bordes
+    // Paso 3: Encontrar candidatos de bordes del documento (Estrategia de afuera hacia adentro)
+    const margin = 0.05; // 5% de margen
+    const searchLimit = 0.45; // Buscar hasta el 45% hacia el centro
+    const thresholdRatio = 0.35; // 35% del pico máximo
+    const minContrastEdge = w * 5; // Ruido mínimo a ignorar
 
     let topY = Math.floor(h * margin);
     let bottomY = Math.floor(h * (1 - margin));
     let leftX = Math.floor(w * margin);
     let rightX = Math.floor(w * (1 - margin));
 
-    // Buscar borde superior (máximo contraste vertical)
-    let maxContrastTop = 0;
-    for (let y = Math.floor(h * margin); y < Math.floor(h * 0.4); y++) {
-      let contrast = 0;
-      for (let x = Math.floor(w * 0.2); x < Math.floor(w * 0.8); x += 2) {
-        contrast += edges[y * w + x];
+    // Borde Superior
+    let maxTop = 0;
+    const topContrasts = new Float32Array(h);
+    for (let y = Math.floor(h * margin); y < Math.floor(h * searchLimit); y++) {
+      let c = 0;
+      for (let x = Math.floor(w * 0.15); x < Math.floor(w * 0.85); x += 2) {
+        c += edges[y * w + x];
       }
-      if (contrast > maxContrastTop) {
-        maxContrastTop = contrast;
+      topContrasts[y] = c;
+      if (c > maxTop) maxTop = c;
+    }
+    for (let y = Math.floor(h * margin); y < Math.floor(h * searchLimit); y++) {
+      if (topContrasts[y] > maxTop * thresholdRatio && topContrasts[y] > minContrastEdge) {
         topY = y;
+        break; // Primer borde fuerte desde afuera
       }
     }
 
-    // Buscar borde inferior
-    let maxContrastBottom = 0;
-    for (let y = Math.floor(h * 0.6); y < Math.floor(h * (1 - margin)); y++) {
-      let contrast = 0;
-      for (let x = Math.floor(w * 0.2); x < Math.floor(w * 0.8); x += 2) {
-        contrast += edges[y * w + x];
+    // Borde Inferior
+    let maxBottom = 0;
+    const bottomContrasts = new Float32Array(h);
+    for (let y = Math.floor(h * (1 - margin)); y > Math.floor(h * (1 - searchLimit)); y--) {
+      let c = 0;
+      for (let x = Math.floor(w * 0.15); x < Math.floor(w * 0.85); x += 2) {
+        c += edges[y * w + x];
       }
-      if (contrast > maxContrastBottom) {
-        maxContrastBottom = contrast;
+      bottomContrasts[y] = c;
+      if (c > maxBottom) maxBottom = c;
+    }
+    for (let y = Math.floor(h * (1 - margin)); y > Math.floor(h * (1 - searchLimit)); y--) {
+      if (bottomContrasts[y] > maxBottom * thresholdRatio && bottomContrasts[y] > minContrastEdge) {
         bottomY = y;
+        break;
       }
     }
 
-    // Buscar borde izquierdo
-    let maxContrastLeft = 0;
-    for (let x = Math.floor(w * margin); x < Math.floor(w * 0.4); x++) {
-      let contrast = 0;
-      for (let y = Math.floor(h * 0.2); y < Math.floor(h * 0.8); y += 2) {
-        contrast += edges[y * w + x];
+    // Borde Izquierdo
+    let maxLeft = 0;
+    const leftContrasts = new Float32Array(w);
+    for (let x = Math.floor(w * margin); x < Math.floor(w * searchLimit); x++) {
+      let c = 0;
+      for (let y = Math.floor(h * 0.15); y < Math.floor(h * 0.85); y += 2) {
+        c += edges[y * w + x];
       }
-      if (contrast > maxContrastLeft) {
-        maxContrastLeft = contrast;
+      leftContrasts[x] = c;
+      if (c > maxLeft) maxLeft = c;
+    }
+    for (let x = Math.floor(w * margin); x < Math.floor(w * searchLimit); x++) {
+      if (leftContrasts[x] > maxLeft * thresholdRatio && leftContrasts[x] > h * 5) {
         leftX = x;
+        break;
       }
     }
 
-    // Buscar borde derecho
-    let maxContrastRight = 0;
-    for (let x = Math.floor(w * 0.6); x < Math.floor(w * (1 - margin)); x++) {
-      let contrast = 0;
-      for (let y = Math.floor(h * 0.2); y < Math.floor(h * 0.8); y += 2) {
-        contrast += edges[y * w + x];
+    // Borde Derecho
+    let maxRight = 0;
+    const rightContrasts = new Float32Array(w);
+    for (let x = Math.floor(w * (1 - margin)); x > Math.floor(w * (1 - searchLimit)); x--) {
+      let c = 0;
+      for (let y = Math.floor(h * 0.15); y < Math.floor(h * 0.85); y += 2) {
+        c += edges[y * w + x];
       }
-      if (contrast > maxContrastRight) {
-        maxContrastRight = contrast;
+      rightContrasts[x] = c;
+      if (c > maxRight) maxRight = c;
+    }
+    for (let x = Math.floor(w * (1 - margin)); x > Math.floor(w * (1 - searchLimit)); x--) {
+      if (rightContrasts[x] > maxRight * thresholdRatio && rightContrasts[x] > h * 5) {
         rightX = x;
+        break;
       }
     }
 
