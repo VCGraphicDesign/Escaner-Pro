@@ -755,6 +755,7 @@ export async function detectDocumentCorners(originalBase64: string): Promise<Cro
     // Buscar los puntos de mayor contraste en 4 direcciones desde el centro
     const centerX = w / 2;
     const centerY = h / 2;
+    const centerBias = 0.01; // Penalización suave para dar prioridad a documentos en el centro
     const margin = 0.1; // 10% de margen desde los bordes
 
     let topY = Math.floor(h * margin);
@@ -769,8 +770,10 @@ export async function detectDocumentCorners(originalBase64: string): Promise<Cro
       for (let x = Math.floor(w * 0.2); x < Math.floor(w * 0.8); x += 2) {
         contrast += edges[y * w + x];
       }
-      if (contrast > maxContrastTop) {
-        maxContrastTop = contrast;
+      const distanceFromCenter = Math.abs(y - centerY);
+      const score = contrast / (1 + distanceFromCenter * centerBias);
+      if (score > maxContrastTop) {
+        maxContrastTop = score;
         topY = y;
       }
     }
@@ -782,8 +785,10 @@ export async function detectDocumentCorners(originalBase64: string): Promise<Cro
       for (let x = Math.floor(w * 0.2); x < Math.floor(w * 0.8); x += 2) {
         contrast += edges[y * w + x];
       }
-      if (contrast > maxContrastBottom) {
-        maxContrastBottom = contrast;
+      const distanceFromCenter = Math.abs(y - centerY);
+      const score = contrast / (1 + distanceFromCenter * centerBias);
+      if (score > maxContrastBottom) {
+        maxContrastBottom = score;
         bottomY = y;
       }
     }
@@ -795,8 +800,10 @@ export async function detectDocumentCorners(originalBase64: string): Promise<Cro
       for (let y = Math.floor(h * 0.2); y < Math.floor(h * 0.8); y += 2) {
         contrast += edges[y * w + x];
       }
-      if (contrast > maxContrastLeft) {
-        maxContrastLeft = contrast;
+      const distanceFromCenter = Math.abs(x - centerX);
+      const score = contrast / (1 + distanceFromCenter * centerBias);
+      if (score > maxContrastLeft) {
+        maxContrastLeft = score;
         leftX = x;
       }
     }
@@ -808,8 +815,10 @@ export async function detectDocumentCorners(originalBase64: string): Promise<Cro
       for (let y = Math.floor(h * 0.2); y < Math.floor(h * 0.8); y += 2) {
         contrast += edges[y * w + x];
       }
-      if (contrast > maxContrastRight) {
-        maxContrastRight = contrast;
+      const distanceFromCenter = Math.abs(x - centerX);
+      const score = contrast / (1 + distanceFromCenter * centerBias);
+      if (score > maxContrastRight) {
+        maxContrastRight = score;
         rightX = x;
       }
     }
