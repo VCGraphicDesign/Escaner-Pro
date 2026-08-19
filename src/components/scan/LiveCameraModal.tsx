@@ -11,9 +11,12 @@ import {
   Sparkles,
   AlertCircle,
   Loader2,
-  Maximize2,
   Scan,
+  CheckCircle2,
+  Zap,
 } from 'lucide-react';
+import { CropPoints } from '../../types';
+import { applyPerspectiveCrop } from '../../services/imageProcessor';
 
 interface LiveCameraModalProps {
   isOpen: boolean;
@@ -28,12 +31,27 @@ export default function LiveCameraModal({ isOpen, onClose, onCapture }: LiveCame
   const [isLoading, setIsLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isFlashing, setIsFlashing] = useState(false);
+  const [hasDetectedDoc, setHasDetectedDoc] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
+  const sampleCanvasRef = useRef<HTMLCanvasElement>(null);
+  const animFrameIdRef = useRef<number | null>(null);
+
+  // Coordenadas suavizadas del documento detectado en tiempo real
+  const currentCropRef = useRef<CropPoints>({
+    topLeft: { x: 0.1, y: 0.1 },
+    topRight: { x: 0.9, y: 0.1 },
+    bottomRight: { x: 0.9, y: 0.9 },
+    bottomLeft: { x: 0.1, y: 0.9 },
+  });
 
   // Detener el stream de cámara actual
   const stopStream = useCallback(() => {
+    if (animFrameIdRef.current) {
+      cancelAnimationFrame(animFrameIdRef.current);
+      animFrameIdRef.current = null;
+    }
     if (stream) {
       stream.getTracks().forEach((track) => track.stop());
       setStream(null);
@@ -46,7 +64,6 @@ export default function LiveCameraModal({ isOpen, onClose, onCapture }: LiveCame
       setIsLoading(true);
       setErrorMsg(null);
 
-      // Detener stream previo
       if (stream) {
         stream.getTracks().forEach((track) => track.stop());
       }
@@ -71,12 +88,10 @@ export default function LiveCameraModal({ isOpen, onClose, onCapture }: LiveCame
           await videoRef.current.play();
         }
 
-        // Obtener lista de cámaras disponibles
         const devices = await navigator.mediaDevices.enumerateDevices();
         const videoDevices = devices.filter((d) => d.kind === 'videoinput');
         setCameras(videoDevices);
 
-        // Identificar la cámara activa
         const activeTrack = mediaStream.getVideoTracks()[0];
         const activeSettings = activeTrack?.getSettings();
         if (activeSettings?.deviceId) {
@@ -92,7 +107,7 @@ export default function LiveCameraModal({ isOpen, onClose, onCapture }: LiveCame
         console.error('Error accediendo a la cámara:', err);
         setIsLoading(false);
         if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-          setErrorMsg('Permiso de cámara denegado. Por favor permite el acceso a la cámara en los permisos de tu navegador.');
+          setErrorMsg('Permiso de cámara denegado. Permite el acceso en la barra de direcciones de tu navegador.');
         } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
           setErrorMsg('No se encontró ninguna cámara conectada a este dispositivo.');
         } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
@@ -104,6 +119,208 @@ export default function LiveCameraModal({ isOpen, onClose, onCapture }: LiveCame
     },
     [stream]
   );
+
+  // Bucle de Visión por Computadora en Tiempo Real
+  const runLiveEdgeDetection = useCallback(() => {
+    const video = videoRef.current;
+    const overlay = overlayCanvasRef.current;
+    const sampleCanvas = sampleCanvasRef.current;
+
+    if (!video || !overlay || !sampleCanvas || video.readyState < 2 || video.videoWidth === 0) {
+      animFrameIdRef.current = requestAnimationFrame(runLiveEdgeDetection);
+      return;
+    }
+
+    // 1. Sincronizar tamaño del canvas overlay con el elemento de video en pantalla
+    const rect = video.getBoundingClientRect();
+    if (overlay.width !== rect.width || overlay.height !== rect.height) {
+      overlay.width = rect.width;
+      overlay.height = rect.height;
+    }
+
+    const overlayCtx = overlay.getContext('2d');
+    if (!overlayCtx) {
+      animFrameIdRef.current = requestAnimationFrame(runLiveEdgeDetection);
+      return;
+    }
+
+    // 2. Muestrear el fotograma en baja resolución para detección ultrarrápida (30+ FPS)
+    const sampleW = 200;
+    const sampleH = Math.max(30, Math.round((sampleW * video.videoHeight) / video.videoWidth));
+    if (sampleCanvas.width !== sampleW || sampleCanvas.height !== sampleH) {
+      sampleCanvas.width = sampleW;
+      sampleCanvas.height = sampleH;
+    }
+
+    const sampleCtx = sampleCanvas.getContext('2d', { willReadFrequently: true });
+    if (!sampleCtx) {
+      animFrameIdRef.current = requestAnimationFrame(runLiveEdgeDetection);
+      return;
+    }
+
+    sampleCtx.drawImage(video, 0, 0, sampleW, sampleH);
+    const imgData = sampleCtx.getImageData(0, 0, sampleW, sampleH);
+    const data = imgData.data;
+
+    // 3. Algoritmo de detección de bordes y superficie de papel
+    const totalPixels = sampleW * sampleH;
+    const gray = new Uint8Array(totalPixels);
+    const histogram = new Uint32Array(256);
+
+    for (let i = 0; i < data.length; i += 4) {
+      const g = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
+      const idx = i / 4;
+      gray[idx] = g;
+      histogram[g]++;
+    }
+
+    // Umbral de Otsu
+    let sumTotal = 0;
+    for (let i = 0; i < 256; i++) sumTotal += i * histogram[i];
+    let sumB = 0, wB = 0, maxVar = 0, threshold = 128;
+
+    for (let t = 0; t < 256; t++) {
+      wB += histogram[t];
+      if (wB === 0) continue;
+      const wF = totalPixels - wB;
+      if (wF === 0) break;
+      sumB += t * histogram[t];
+      const mB = sumB / wB;
+      const mF = (sumTotal - sumB) / wF;
+      const v = wB * wF * (mB - mF) * (mB - mF);
+      if (v > maxVar) {
+        maxVar = v;
+        threshold = t;
+      }
+    }
+
+    // Búsqueda de contorno del documento
+    let minX = sampleW, maxX = 0, minY = sampleH, maxY = 0;
+    let foundCount = 0;
+
+    for (let y = 2; y < sampleH - 2; y += 2) {
+      for (let x = 2; x < sampleW - 2; x += 2) {
+        const idx = y * sampleW + x;
+        // Pixel de papel/documento
+        if (gray[idx] >= threshold - 15) {
+          foundCount++;
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+
+    const docWidth = maxX - minX;
+    const docHeight = maxY - minY;
+    const isDetected = docWidth > sampleW * 0.22 && docHeight > sampleH * 0.22 && foundCount > 40;
+
+    let targetCrop: CropPoints;
+    if (isDetected) {
+      targetCrop = {
+        topLeft: { x: Math.max(0.02, minX / sampleW), y: Math.max(0.02, minY / sampleH) },
+        topRight: { x: Math.min(0.98, maxX / sampleW), y: Math.max(0.02, minY / sampleH) },
+        bottomRight: { x: Math.min(0.98, maxX / sampleW), y: Math.min(0.98, maxY / sampleH) },
+        bottomLeft: { x: Math.max(0.02, minX / sampleW), y: Math.min(0.98, maxY / sampleH) },
+      };
+      setHasDetectedDoc(true);
+    } else {
+      // Guía centrada por defecto
+      targetCrop = {
+        topLeft: { x: 0.12, y: 0.1 },
+        topRight: { x: 0.88, y: 0.1 },
+        bottomRight: { x: 0.88, y: 0.9 },
+        bottomLeft: { x: 0.12, y: 0.9 },
+      };
+      setHasDetectedDoc(false);
+    }
+
+    // 4. Suavizado temporal exponencial (EMA) para eliminar temblores
+    const alpha = 0.35;
+    const cur = currentCropRef.current;
+    cur.topLeft.x = cur.topLeft.x * (1 - alpha) + targetCrop.topLeft.x * alpha;
+    cur.topLeft.y = cur.topLeft.y * (1 - alpha) + targetCrop.topLeft.y * alpha;
+    cur.topRight.x = cur.topRight.x * (1 - alpha) + targetCrop.topRight.x * alpha;
+    cur.topRight.y = cur.topRight.y * (1 - alpha) + targetCrop.topRight.y * alpha;
+    cur.bottomRight.x = cur.bottomRight.x * (1 - alpha) + targetCrop.bottomRight.x * alpha;
+    cur.bottomRight.y = cur.bottomRight.y * (1 - alpha) + targetCrop.bottomRight.y * alpha;
+    cur.bottomLeft.x = cur.bottomLeft.x * (1 - alpha) + targetCrop.bottomLeft.x * alpha;
+    cur.bottomLeft.y = cur.bottomLeft.y * (1 - alpha) + targetCrop.bottomLeft.y * alpha;
+
+    // 5. Dibujar el Polígono Iluminado en Tiempo Real sobre el Video
+    overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+
+    const ow = overlay.width;
+    const oh = overlay.height;
+
+    const p0 = { x: cur.topLeft.x * ow, y: cur.topLeft.y * oh };
+    const p1 = { x: cur.topRight.x * ow, y: cur.topRight.y * oh };
+    const p2 = { x: cur.bottomRight.x * ow, y: cur.bottomRight.y * oh };
+    const p3 = { x: cur.bottomLeft.x * ow, y: cur.bottomLeft.y * oh };
+
+    // Sombra oscura exterior para enfocar el documento
+    overlayCtx.save();
+    overlayCtx.beginPath();
+    overlayCtx.rect(0, 0, ow, oh);
+    overlayCtx.moveTo(p0.x, p0.y);
+    overlayCtx.lineTo(p3.x, p3.y);
+    overlayCtx.lineTo(p2.x, p2.y);
+    overlayCtx.lineTo(p1.x, p1.y);
+    overlayCtx.closePath();
+    overlayCtx.fillStyle = 'rgba(0, 0, 0, 0.35)';
+    overlayCtx.fill();
+
+    // Relleno iluminado del documento
+    overlayCtx.beginPath();
+    overlayCtx.moveTo(p0.x, p0.y);
+    overlayCtx.lineTo(p1.x, p1.y);
+    overlayCtx.lineTo(p2.x, p2.y);
+    overlayCtx.lineTo(p3.x, p3.y);
+    overlayCtx.closePath();
+
+    const glowColor = isDetected ? '#00E676' : '#2979FF';
+    overlayCtx.fillStyle = isDetected ? 'rgba(0, 230, 118, 0.12)' : 'rgba(41, 121, 255, 0.08)';
+    overlayCtx.fill();
+
+    // Borde brillante
+    overlayCtx.lineWidth = isDetected ? 3 : 2;
+    overlayCtx.strokeStyle = glowColor;
+    overlayCtx.shadowColor = glowColor;
+    overlayCtx.shadowBlur = isDetected ? 14 : 6;
+    overlayCtx.stroke();
+    overlayCtx.restore();
+
+    // 4 Esquinas Circulares con Mangos de Ajuste
+    [p0, p1, p2, p3].forEach((pt) => {
+      overlayCtx.save();
+      overlayCtx.beginPath();
+      overlayCtx.arc(pt.x, pt.y, isDetected ? 8 : 6, 0, Math.PI * 2);
+      overlayCtx.fillStyle = '#FFFFFF';
+      overlayCtx.shadowColor = glowColor;
+      overlayCtx.shadowBlur = 10;
+      overlayCtx.fill();
+      overlayCtx.lineWidth = 2.5;
+      overlayCtx.strokeStyle = glowColor;
+      overlayCtx.stroke();
+      overlayCtx.restore();
+    });
+
+    animFrameIdRef.current = requestAnimationFrame(runLiveEdgeDetection);
+  }, []);
+
+  // Iniciar la detección en cuanto el video comience
+  useEffect(() => {
+    if (isOpen && !isLoading) {
+      animFrameIdRef.current = requestAnimationFrame(runLiveEdgeDetection);
+    }
+    return () => {
+      if (animFrameIdRef.current) {
+        cancelAnimationFrame(animFrameIdRef.current);
+        animFrameIdRef.current = null;
+      }
+    };
+  }, [isOpen, isLoading, runLiveEdgeDetection]);
 
   // Al abrir el modal, iniciar la cámara
   useEffect(() => {
@@ -127,7 +344,7 @@ export default function LiveCameraModal({ isOpen, onClose, onCapture }: LiveCame
     startCamera(nextCamera.deviceId);
   };
 
-  // Capturar fotograma en alta resolución
+  // Capturar fotograma en alta resolución y recortar según los bordes detectados en vivo
   const handleCapture = () => {
     const video = videoRef.current;
     if (!video || !video.videoWidth || !video.videoHeight) return;
@@ -136,29 +353,33 @@ export default function LiveCameraModal({ isOpen, onClose, onCapture }: LiveCame
     setIsFlashing(true);
     setTimeout(() => setIsFlashing(false), 200);
 
-    const canvas = canvasRef.current || document.createElement('canvas');
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    // 1. Dibujar fotograma en máxima resolución
+    const fullCanvas = document.createElement('canvas');
+    fullCanvas.width = video.videoWidth;
+    fullCanvas.height = video.videoHeight;
+    const fullCtx = fullCanvas.getContext('2d');
+    if (!fullCtx) return;
 
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    fullCtx.drawImage(video, 0, 0, fullCanvas.width, fullCanvas.height);
 
-    // Dibujar el fotograma del video en el canvas
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    // 2. Aplicar el recorte de perspectiva usando las esquinas detectadas en tiempo real
+    const cropCoords = currentCropRef.current;
+    const croppedCanvas = document.createElement('canvas');
+    applyPerspectiveCrop(fullCanvas, croppedCanvas, cropCoords);
 
-    // Obtener la imagen en alta calidad
-    const base64 = canvas.toDataURL('image/jpeg', 0.95);
+    // 3. Exportar la imagen ya recortada y aplanada
+    const croppedBase64 = croppedCanvas.toDataURL('image/jpeg', 0.95);
 
-    // Enviar la captura al componente padre
-    onCapture(base64);
+    // 4. Enviar la imagen recortada
+    onCapture(croppedBase64);
   };
 
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 bg-black flex flex-col items-center justify-between select-none overflow-hidden animate-fade-in">
-      {/* 1. Barra Superior con controles */}
-      <div className="w-full flex items-center justify-between px-4 py-3 bg-gradient-to-b from-black/80 to-transparent z-20">
+      {/* 1. Barra Superior con controles y estado de detección */}
+      <div className="w-full flex items-center justify-between px-4 py-3 bg-gradient-to-b from-black/90 to-transparent z-20">
         <button
           onClick={() => {
             stopStream();
@@ -170,9 +391,25 @@ export default function LiveCameraModal({ isOpen, onClose, onCapture }: LiveCame
           <X size={20} />
         </button>
 
-        <div className="flex items-center gap-1.5 px-3 py-1 bg-white/10 backdrop-blur-md rounded-full border border-white/10">
-          <Scan size={14} className="text-[#2979FF]" />
-          <span className="text-xs font-semibold tracking-wide text-white">Cámara en Vivo</span>
+        {/* Badge en vivo de estado de detección */}
+        <div
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full backdrop-blur-md border transition-all duration-300 ${
+            hasDetectedDoc
+              ? 'bg-[#00E676]/20 border-[#00E676]/50 text-[#00E676]'
+              : 'bg-white/10 border-white/10 text-white'
+          }`}
+        >
+          {hasDetectedDoc ? (
+            <>
+              <CheckCircle2 size={13} className="animate-pulse" />
+              <span className="text-xs font-bold tracking-wide">Documento Detectado</span>
+            </>
+          ) : (
+            <>
+              <Scan size={13} className="text-[#2979FF]" />
+              <span className="text-xs font-semibold tracking-wide">Buscando bordes...</span>
+            </>
+          )}
         </div>
 
         {cameras.length > 1 ? (
@@ -188,7 +425,7 @@ export default function LiveCameraModal({ isOpen, onClose, onCapture }: LiveCame
         )}
       </div>
 
-      {/* 2. Visor de Cámara en Tiempo Real con Guía de Documento */}
+      {/* 2. Visor de Cámara con Canvas Overlay de Detección de Bordes en Tiempo Real */}
       <div className="relative w-full flex-1 flex items-center justify-center bg-black overflow-hidden">
         {/* Elemento de Video WebRTC */}
         <video
@@ -201,6 +438,12 @@ export default function LiveCameraModal({ isOpen, onClose, onCapture }: LiveCame
           }`}
         />
 
+        {/* Canvas Overlay donde se dibuja el polígono de selección en tiempo real */}
+        <canvas
+          ref={overlayCanvasRef}
+          className="absolute inset-0 w-full h-full pointer-events-none z-10"
+        />
+
         {/* Efecto Flash de Obturación */}
         {isFlashing && (
           <div className="absolute inset-0 bg-white pointer-events-none z-30 transition-opacity duration-150" />
@@ -210,7 +453,7 @@ export default function LiveCameraModal({ isOpen, onClose, onCapture }: LiveCame
         {isLoading && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-[#2979FF] bg-black/90 z-20">
             <Loader2 size={36} className="animate-spin" />
-            <span className="text-xs font-semibold text-gray-300">Iniciando cámara...</span>
+            <span className="text-xs font-semibold text-gray-300">Iniciando cámara inteligente...</span>
           </div>
         )}
 
@@ -230,46 +473,43 @@ export default function LiveCameraModal({ isOpen, onClose, onCapture }: LiveCame
             </button>
           </div>
         )}
-
-        {/* Guía Visual para encuadrar el Documento */}
-        {!isLoading && !errorMsg && (
-          <div className="absolute inset-6 pointer-events-none flex flex-col items-center justify-center z-10">
-            <div className="w-full max-w-sm aspect-[3/4] border-2 border-dashed border-[#2979FF]/60 rounded-3xl relative flex items-center justify-center shadow-[0_0_50px_rgba(41,121,255,0.15)]">
-              {/* 4 Esquinas destacadas */}
-              <div className="absolute -top-1 -left-1 w-6 h-6 border-t-4 border-l-4 border-[#2979FF] rounded-tl-xl" />
-              <div className="absolute -top-1 -right-1 w-6 h-6 border-t-4 border-r-4 border-[#2979FF] rounded-tr-xl" />
-              <div className="absolute -bottom-1 -left-1 w-6 h-6 border-b-4 border-l-4 border-[#2979FF] rounded-bl-xl" />
-              <div className="absolute -bottom-1 -right-1 w-6 h-6 border-b-4 border-r-4 border-[#2979FF] rounded-br-xl" />
-
-              <span className="text-[11px] font-semibold text-white/80 bg-black/40 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/10">
-                Alinea el documento aquí
-              </span>
-            </div>
-          </div>
-        )}
       </div>
 
       {/* 3. Barra Inferior con Botón de Disparo / Captura */}
-      <div className="w-full pb-8 pt-4 px-6 bg-gradient-to-t from-black/90 via-black/60 to-transparent flex items-center justify-center z-20">
+      <div className="w-full pb-8 pt-4 px-6 bg-gradient-to-t from-black/95 via-black/70 to-transparent flex flex-col items-center gap-3 z-20">
+        <p className="text-[11px] text-gray-400 font-medium">
+          {hasDetectedDoc
+            ? '✨ Bordes fijados. Presiona para recortar y escanear'
+            : 'Enfoca el documento sobre una superficie plana'}
+        </p>
+
         <button
           onClick={handleCapture}
           disabled={isLoading || !!errorMsg}
-          className={`relative group w-20 h-20 rounded-full border-4 border-white/80 p-1 flex items-center justify-center shadow-2xl transition-all ${
+          className={`relative group w-20 h-20 rounded-full border-4 p-1 flex items-center justify-center shadow-2xl transition-all ${
+            hasDetectedDoc
+              ? 'border-[#00E676] shadow-[#00E676]/40 scale-105'
+              : 'border-white/80 shadow-[#2979FF]/30'
+          } ${
             isLoading || !!errorMsg
               ? 'opacity-40 cursor-not-allowed'
-              : 'hover:scale-105 active:scale-90 cursor-pointer shadow-[#2979FF]/40'
+              : 'hover:scale-110 active:scale-90 cursor-pointer'
           }`}
-          title="Tomar foto del documento"
+          title="Capturar y recortar documento"
         >
           {/* Círculo interno disparador */}
-          <div className="w-full h-full rounded-full bg-[#2979FF] group-hover:bg-[#2979FF]/90 transition-all flex items-center justify-center text-white shadow-inner">
-            <Camera size={26} />
+          <div
+            className={`w-full h-full rounded-full transition-all flex items-center justify-center text-white shadow-inner ${
+              hasDetectedDoc ? 'bg-[#00E676]' : 'bg-[#2979FF] group-hover:bg-[#2979FF]/90'
+            }`}
+          >
+            <Camera size={26} className={hasDetectedDoc ? 'text-black' : 'text-white'} />
           </div>
         </button>
       </div>
 
-      {/* Canvas oculto para procesar el fotograma */}
-      <canvas ref={canvasRef} className="hidden" />
+      {/* Canvas oculto para muestreo de fotogramas */}
+      <canvas ref={sampleCanvasRef} className="hidden" />
     </div>
   );
 }
