@@ -145,9 +145,9 @@ export default function LiveCameraModal({ isOpen, onClose, onCapture }: LiveCame
       return;
     }
 
-    // 2. Muestrear el fotograma en baja resolución para detección ultrarrápida (30+ FPS)
-    const sampleW = 200;
-    const sampleH = Math.max(30, Math.round((sampleW * video.videoHeight) / video.videoWidth));
+    // 2. Muestrear el fotograma en resolución adecuada para detección nítida y rápida (30+ FPS)
+    const sampleW = 320;
+    const sampleH = Math.max(40, Math.round((sampleW * video.videoHeight) / video.videoWidth));
     if (sampleCanvas.width !== sampleW || sampleCanvas.height !== sampleH) {
       sampleCanvas.width = sampleW;
       sampleCanvas.height = sampleH;
@@ -163,7 +163,7 @@ export default function LiveCameraModal({ isOpen, onClose, onCapture }: LiveCame
     const imgData = sampleCtx.getImageData(0, 0, sampleW, sampleH);
     const data = imgData.data;
 
-    // 3. Detección de Bordes con OpenCV.js (Canny + findContours + approxPolyDP)
+    // 3. Detección de Bordes con OpenCV.js (Canal Dual: Otsu Morph + Canny)
     const openCVCrop = detectOpenCVCorners(sampleCanvas);
     let targetCrop: CropPoints;
     let isDetected = false;
@@ -233,17 +233,17 @@ export default function LiveCameraModal({ isOpen, onClose, onCapture }: LiveCame
         setHasDetectedDoc(true);
       } else {
         targetCrop = {
-          topLeft: { x: 0.15, y: 0.15 },
-          topRight: { x: 0.85, y: 0.15 },
-          bottomRight: { x: 0.85, y: 0.85 },
-          bottomLeft: { x: 0.15, y: 0.85 },
+          topLeft: { x: 0.12, y: 0.12 },
+          topRight: { x: 0.88, y: 0.12 },
+          bottomRight: { x: 0.88, y: 0.88 },
+          bottomLeft: { x: 0.12, y: 0.88 },
         };
         setHasDetectedDoc(false);
       }
     }
 
     // 4. Suavizado temporal exponencial (EMA) para eliminar temblores
-    const alpha = 0.25;
+    const alpha = isDetected ? 0.35 : 0.08;
     const cur = currentCropRef.current;
     cur.topLeft.x = cur.topLeft.x * (1 - alpha) + targetCrop.topLeft.x * alpha;
     cur.topLeft.y = cur.topLeft.y * (1 - alpha) + targetCrop.topLeft.y * alpha;
