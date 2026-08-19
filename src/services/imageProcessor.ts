@@ -39,7 +39,7 @@ export async function processPageImage(
 ): Promise<string> {
   const img = await loadImage(originalBase64);
   const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) return originalBase64;
 
   // 1. Manejar rotación e inicializar tamaño del canvas
@@ -60,7 +60,7 @@ export async function processPageImage(
   // 2. Si hay recorte/perspectiva activa, aplicarlo
   if (adjustments.crop) {
     const croppedCanvas = document.createElement('canvas');
-    const croppedCtx = croppedCanvas.getContext('2d');
+    const croppedCtx = croppedCanvas.getContext('2d', { willReadFrequently: true });
     if (croppedCtx) {
       applyPerspectiveCrop(canvas, croppedCanvas, adjustments.crop);
       canvas.width = croppedCanvas.width;
@@ -120,10 +120,11 @@ export async function processPageImage(
   // 6. Aplicar modelo de dewarp basado en DocUNet‑lite (si está disponible)
   try {
     const coeffs = await predictWarp(canvas.toDataURL('image/jpeg', 0.85));
-    console.log('Dewarp coefficients:', coeffs);
-    await applyDewarp(canvas, coeffs);
-  } catch (e) {
-    console.warn('Modelo de dewarp no disponible:', e);
+    if (coeffs) {
+      await applyDewarp(canvas, coeffs);
+    }
+  } catch {
+    // Ignorar si el modelo no está presente
   }
 
   return canvas.toDataURL('image/jpeg', 0.85);
@@ -138,7 +139,7 @@ export function applyPerspectiveCrop(
   destCanvas: HTMLCanvasElement,
   corners: CropPoints
 ) {
-  const srcCtx = srcCanvas.getContext('2d');
+  const srcCtx = srcCanvas.getContext('2d', { willReadFrequently: true });
   if (!srcCtx) return;
 
   const w = srcCanvas.width;
@@ -169,7 +170,7 @@ export function applyPerspectiveCrop(
   destCanvas.width = Math.round(destWidth);
   destCanvas.height = Math.round(destHeight);
 
-  const destCtx = destCanvas.getContext('2d');
+  const destCtx = destCanvas.getContext('2d', { willReadFrequently: true });
   if (!destCtx) return;
 
   // Para un rendimiento rápido en JS sin dependencias pesadas de WebGL,
@@ -229,7 +230,7 @@ export function applyPerspectiveCrop(
  * Remueve gradientes de sombras y normaliza la iluminación localmente.
  */
 export function normalizeIllumination(canvas: HTMLCanvasElement) {
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) return;
 
   const w = canvas.width;
@@ -246,7 +247,7 @@ export function normalizeIllumination(canvas: HTMLCanvasElement) {
   const illumH = Math.round((illumW * h) / w);
   tempCanvas.width = illumW;
   tempCanvas.height = illumH;
-  const tempCtx = tempCanvas.getContext('2d');
+  const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
   if (!tempCtx) return;
 
   // Dibujamos la imagen pequeña (blur/promedio local implícito)
@@ -298,7 +299,7 @@ export function normalizeIllumination(canvas: HTMLCanvasElement) {
  * eliminando todas las sombras del ambiente.
  */
 export function applyAdaptiveThreshold(canvas: HTMLCanvasElement) {
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) return;
 
   const w = canvas.width;
@@ -375,7 +376,7 @@ export function applyAdaptiveThreshold(canvas: HTMLCanvasElement) {
  * Escala de grises simple.
  */
 export function applyGrayscale(canvas: HTMLCanvasElement) {
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) return;
 
   const w = canvas.width;
@@ -397,7 +398,7 @@ export function applyGrayscale(canvas: HTMLCanvasElement) {
  * Color mejorado (Aumenta saturación y estira el contraste).
  */
 export function applyColorEnhancement(canvas: HTMLCanvasElement) {
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) return;
 
   const w = canvas.width;
@@ -434,7 +435,7 @@ export function applyColorEnhancement(canvas: HTMLCanvasElement) {
  * @param amount Factor de nitidez (0 a 1)
  */
 export function applySharpness(canvas: HTMLCanvasElement, amount: number) {
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) return;
 
   const w = canvas.width;
@@ -476,7 +477,7 @@ export function applySharpness(canvas: HTMLCanvasElement, amount: number) {
  * Aplica una curva gamma que aclara las sombras y mantiene los detalles en las áreas claras.
  */
 export function applyGammaCorrection(canvas: HTMLCanvasElement) {
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) return;
 
   const w = canvas.width;
@@ -519,7 +520,7 @@ export function restoreDocument(canvas: HTMLCanvasElement) {
  * Convierte cualquier fondo de papel arrugado/sombreado en blanco puro sin degradar el texto.
  */
 export function removeWrinklesAndShadows(canvas: HTMLCanvasElement) {
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) return;
 
   const w = canvas.width;
@@ -533,7 +534,7 @@ export function removeWrinklesAndShadows(canvas: HTMLCanvasElement) {
   const bgH = Math.round((bgW * h) / w);
   bgCanvas.width = bgW;
   bgCanvas.height = bgH;
-  const bgCtx = bgCanvas.getContext('2d');
+  const bgCtx = bgCanvas.getContext('2d', { willReadFrequently: true });
   if (!bgCtx) return;
 
   // Dibujar a baja resolución con suavizado
@@ -595,7 +596,7 @@ export function removeWrinklesAndShadows(canvas: HTMLCanvasElement) {
  * Escanea los márgenes laterales e identifica manchas/huecos circulares oscuros.
  */
 export function removePunchHoles(canvas: HTMLCanvasElement) {
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) return;
 
   const w = canvas.width;
@@ -684,7 +685,7 @@ export async function applyDewarp(canvas: HTMLCanvasElement, coeffs: number[]): 
   const tempCanvas = document.createElement('canvas');
   tempCanvas.width = w;
   tempCanvas.height = h;
-  const tempCtx = tempCanvas.getContext('2d');
+  const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
   if (!tempCtx) return;
 
   // Load the current canvas content as an image.
@@ -700,7 +701,7 @@ export async function applyDewarp(canvas: HTMLCanvasElement, coeffs: number[]): 
   tempCtx.drawImage(img, 0, 0);
 
   // Copy the transformed image back to the original canvas.
-  const originalCtx = canvas.getContext('2d');
+  const originalCtx = canvas.getContext('2d', { willReadFrequently: true });
   if (!originalCtx) return;
   originalCtx.clearRect(0, 0, w, h);
   originalCtx.drawImage(tempCanvas, 0, 0);
@@ -735,7 +736,7 @@ export async function detectDocumentCorners(originalBase64: string): Promise<Cro
     canvas.width = targetW;
     canvas.height = targetH;
 
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) return defaultCrop;
 
     ctx.drawImage(img, 0, 0, targetW, targetH);

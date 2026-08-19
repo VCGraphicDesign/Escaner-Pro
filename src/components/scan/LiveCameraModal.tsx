@@ -138,7 +138,7 @@ export default function LiveCameraModal({ isOpen, onClose, onCapture }: LiveCame
       overlay.height = rect.height;
     }
 
-    const overlayCtx = overlay.getContext('2d');
+    const overlayCtx = overlay.getContext('2d', { willReadFrequently: true });
     if (!overlayCtx) {
       animFrameIdRef.current = requestAnimationFrame(runLiveEdgeDetection);
       return;
@@ -357,7 +357,7 @@ export default function LiveCameraModal({ isOpen, onClose, onCapture }: LiveCame
     const fullCanvas = document.createElement('canvas');
     fullCanvas.width = video.videoWidth;
     fullCanvas.height = video.videoHeight;
-    const fullCtx = fullCanvas.getContext('2d');
+    const fullCtx = fullCanvas.getContext('2d', { willReadFrequently: true });
     if (!fullCtx) return;
 
     fullCtx.drawImage(video, 0, 0, fullCanvas.width, fullCanvas.height);

@@ -4,25 +4,30 @@
  * Tiny wrapper around TensorFlow.js to load a pre‑trained DocUNet‑lite model
  * (MobileNet‑v2 encoder) and predict the geometric transformation needed to
  * flatten a scanned document.
- *
- * The actual model files (model.json + shard binaries) must be placed in
- * `src/assets/models/docunet_mobilenet_v2/`. For the purpose of this prototype a
- * minimal placeholder model is provided – replace it with the real converted
- * TensorFlow.js graph model when available.
  */
 
 import * as tf from '@tensorflow/tfjs';
 
 let model: tf.GraphModel | null = null;
+let modelAttempted = false;
 
-/** Load the model on first use. */
-export async function loadDewarpModel(): Promise<tf.GraphModel> {
-  if (!model) {
-    // The path is relative to the built web assets folder.
+/** Load the model on first use if assets are available. */
+export async function loadDewarpModel(): Promise<tf.GraphModel | null> {
+  if (model) return model;
+  if (modelAttempted) return null;
+
+  modelAttempted = true;
+  try {
     const modelUrl = '/assets/models/docunet_mobilenet_v2/model.json';
+    const response = await fetch(modelUrl, { method: 'HEAD' }).catch(() => null);
+    if (!response || !response.ok) {
+      return null;
+    }
     model = await tf.loadGraphModel(modelUrl);
+    return model;
+  } catch {
+    return null;
   }
-  return model;
 }
 
 /** Helper to convert a base64 image string to an HTMLImageElement. */
@@ -31,30 +36,33 @@ function loadImageFromBase64(base64: string): Promise<HTMLImageElement> {
     const img = new Image();
     img.onload = () => resolve(img);
     img.onerror = (e) => reject(e);
-    // Ensure the string has the data‑uri prefix.
     img.src = base64.startsWith('data:') ? base64 : `data:image/jpeg;base64,${base64}`;
   });
 }
 
 /**
  * Predict the dewarp coefficients.
- * Returns an array of 8 numbers that represent the geometric transformation.
+ * Returns an array of 8 numbers, or null if the model is not available.
  */
-export async function predictWarp(base64: string): Promise<number[]> {
-  // Load the image, resize to the input size expected by the model (256×256).
-  const img = await loadImageFromBase64(base64);
-  const tensor = tf.browser
-    .fromPixels(img)
-    .resizeBilinear([256, 256])
-    .div(255)
-    .expandDims(0);
+export async function predictWarp(base64: string): Promise<number[] | null> {
+  try {
+    const graph = await loadDewarpModel();
+    if (!graph) return null;
 
-  const graph = await loadDewarpModel();
-  // The model outputs a tensor of shape [1, 8] (8 coefficients).
-  const raw = (await graph.executeAsync(tensor)) as tf.Tensor;
-  const coeffs = (await raw.array()) as number[][];
+    const img = await loadImageFromBase64(base64);
+    const tensor = tf.browser
+      .fromPixels(img)
+      .resizeBilinear([256, 256])
+      .div(255)
+      .expandDims(0);
 
-  // Clean up tensors to avoid memory leaks.
-  tf.dispose([tensor, raw]);
-  return coeffs[0];
+    const raw = (await graph.executeAsync(tensor)) as tf.Tensor;
+    const coeffs = (await raw.array()) as number[][];
+
+    tf.dispose([tensor, raw]);
+    return coeffs[0];
+  } catch {
+    return null;
+  }
 }
+
