@@ -712,158 +712,245 @@ export async function applyDewarp(canvas: HTMLCanvasElement, coeffs: number[]): 
  * Detección automática mejorada de los bordes/esquinas del documento.
  * Prioriza por CONTRASTE + ubicación CENTRAL en lugar de tamaño.
  * Ideal para detectar documentos intuitivamente: ticket pequeño sobre libreta, etc.
+/**
+ * Detección automática precisa de bordes y esquinas de documentos y texto.
+ * Utiliza segmentación de contraste, análisis de energía de bordes Sobel y
+ * extracción de cuadrilátero envolvente para aislar la hoja de papel o zona de texto.
  */
 export async function detectDocumentCorners(originalBase64: string): Promise<CropPoints> {
   const defaultCrop: CropPoints = {
-    topLeft: { x: 0.05, y: 0.05 },
-    topRight: { x: 0.95, y: 0.05 },
-    bottomLeft: { x: 0.05, y: 0.95 },
-    bottomRight: { x: 0.95, y: 0.95 },
+    topLeft: { x: 0.08, y: 0.08 },
+    topRight: { x: 0.92, y: 0.08 },
+    bottomLeft: { x: 0.08, y: 0.92 },
+    bottomRight: { x: 0.92, y: 0.92 },
   };
 
   try {
     const img = await loadImage(originalBase64);
     const canvas = document.createElement('canvas');
-    
-    // Usar resolución óptima para detección rápida
-    const targetDim = 300;
-    const scale = Math.min(1, targetDim / Math.max(img.naturalWidth, img.naturalHeight));
-    const w = Math.max(50, Math.round(img.naturalWidth * scale));
-    const h = Math.max(50, Math.round(img.naturalHeight * scale));
-    
-    canvas.width = w;
-    canvas.height = h;
+
+    // Resolución de trabajo óptima para análisis (320px de ancho)
+    const targetW = 320;
+    const targetH = Math.max(50, Math.round((targetW * img.naturalHeight) / img.naturalWidth));
+    canvas.width = targetW;
+    canvas.height = targetH;
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return defaultCrop;
 
-    // Dibujar imagen y convertir a escala de grises
-    ctx.drawImage(img, 0, 0, w, h);
-    const imgData = ctx.getImageData(0, 0, w, h);
+    ctx.drawImage(img, 0, 0, targetW, targetH);
+    const imgData = ctx.getImageData(0, 0, targetW, targetH);
     const data = imgData.data;
 
-    // Paso 1: Convertir a escala de grises
-    const gray = new Uint8Array(w * h);
+    const w = targetW;
+    const h = targetH;
+    const totalPixels = w * h;
+
+    // 1. Escala de grises y cálculo de histograma
+    const gray = new Uint8Array(totalPixels);
+    const histogram = new Uint32Array(256);
+
     for (let i = 0; i < data.length; i += 4) {
-      gray[i / 4] = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
+      const g = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
+      const idx = i / 4;
+      gray[idx] = g;
+      histogram[g]++;
     }
 
-    // Paso 2: Detectar bordes usando Sobel (más simple y rápido que Canny para este caso)
+    // 2. Umbral de Otsu para separar documento (papel claro) del fondo
+    let sumTotal = 0;
+    for (let i = 0; i < 256; i++) sumTotal += i * histogram[i];
+
+    let sumB = 0;
+    let wB = 0;
+    let maxVariance = 0;
+    let otsuThreshold = 128;
+
+    for (let t = 0; t < 256; t++) {
+      wB += histogram[t];
+      if (wB === 0) continue;
+      const wF = totalPixels - wB;
+      if (wF === 0) break;
+
+      sumB += t * histogram[t];
+      const mB = sumB / wB;
+      const mF = (sumTotal - sumB) / wF;
+      const variance = wB * wF * (mB - mF) * (mB - mF);
+
+      if (variance > maxVariance) {
+        maxVariance = variance;
+        otsuThreshold = t;
+      }
+    }
+
+    // 3. Mapa de bordes Sobel
     const edges = detectEdgesSobel(gray, w, h);
 
-    // Paso 3: Encontrar candidatos de bordes del documento (Estrategia de afuera hacia adentro)
-    const margin = 0.05; // 5% de margen
-    const searchLimit = 0.45; // Buscar hasta el 45% hacia el centro
-    const thresholdRatio = 0.35; // 35% del pico máximo
-    const minContrastEdge = w * 5; // Ruido mínimo a ignorar
+    // 4. Mapa de probabilidad de documento (combinación de contraste de brillo y bordes)
+    // El papel suele ser más brillante que el fondo de la habitación/mesa
+    const isBrightPaper = otsuThreshold > 80;
+    const docMask = new Uint8Array(totalPixels);
 
-    let topY = Math.floor(h * margin);
-    let bottomY = Math.floor(h * (1 - margin));
-    let leftX = Math.floor(w * margin);
-    let rightX = Math.floor(w * (1 - margin));
-
-    // Borde Superior
-    let maxTop = 0;
-    const topContrasts = new Float32Array(h);
-    for (let y = Math.floor(h * margin); y < Math.floor(h * searchLimit); y++) {
-      let c = 0;
-      for (let x = Math.floor(w * 0.15); x < Math.floor(w * 0.85); x += 2) {
-        c += edges[y * w + x];
-      }
-      topContrasts[y] = c;
-      if (c > maxTop) maxTop = c;
-    }
-    for (let y = Math.floor(h * margin); y < Math.floor(h * searchLimit); y++) {
-      if (topContrasts[y] > maxTop * thresholdRatio && topContrasts[y] > minContrastEdge) {
-        topY = y;
-        break; // Primer borde fuerte desde afuera
+    for (let y = 1; y < h - 1; y++) {
+      for (let x = 1; x < w - 1; x++) {
+        const idx = y * w + x;
+        const isForeground = isBrightPaper ? gray[idx] >= otsuThreshold - 15 : gray[idx] <= otsuThreshold + 15;
+        const hasEdge = edges[idx] > 30;
+        docMask[idx] = (isForeground || hasEdge) ? 1 : 0;
       }
     }
 
-    // Borde Inferior
-    let maxBottom = 0;
-    const bottomContrasts = new Float32Array(h);
-    for (let y = Math.floor(h * (1 - margin)); y > Math.floor(h * (1 - searchLimit)); y--) {
-      let c = 0;
-      for (let x = Math.floor(w * 0.15); x < Math.floor(w * 0.85); x += 2) {
-        c += edges[y * w + x];
+    // 5. Escaneo de perfiles para detectar los 4 límites del documento (Top, Bottom, Left, Right)
+    // Buscamos donde la densidad del documento supera el umbral de ruido ambiental
+    const colDensity = new Float32Array(w);
+    const rowDensity = new Float32Array(h);
+
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const val = docMask[y * w + x];
+        rowDensity[y] += val;
+        colDensity[x] += val;
       }
-      bottomContrasts[y] = c;
-      if (c > maxBottom) maxBottom = c;
     }
-    for (let y = Math.floor(h * (1 - margin)); y > Math.floor(h * (1 - searchLimit)); y--) {
-      if (bottomContrasts[y] > maxBottom * thresholdRatio && bottomContrasts[y] > minContrastEdge) {
-        bottomY = y;
+
+    // Normalizar densidades
+    for (let x = 0; x < w; x++) colDensity[x] /= h;
+    for (let y = 0; y < h; y++) rowDensity[y] /= w;
+
+    // Umbral de corte: 20% de densidad en fila/columna
+    const densityThreshold = 0.18;
+
+    let minX = 0;
+    let maxX = w - 1;
+    let minY = 0;
+    let maxY = h - 1;
+
+    // Buscar minX (borde izquierdo)
+    for (let x = 0; x < Math.floor(w * 0.45); x++) {
+      if (colDensity[x] > densityThreshold) {
+        minX = Math.max(0, x - 2);
         break;
       }
     }
 
-    // Borde Izquierdo
-    let maxLeft = 0;
-    const leftContrasts = new Float32Array(w);
-    for (let x = Math.floor(w * margin); x < Math.floor(w * searchLimit); x++) {
-      let c = 0;
-      for (let y = Math.floor(h * 0.15); y < Math.floor(h * 0.85); y += 2) {
-        c += edges[y * w + x];
-      }
-      leftContrasts[x] = c;
-      if (c > maxLeft) maxLeft = c;
-    }
-    for (let x = Math.floor(w * margin); x < Math.floor(w * searchLimit); x++) {
-      if (leftContrasts[x] > maxLeft * thresholdRatio && leftContrasts[x] > h * 5) {
-        leftX = x;
+    // Buscar maxX (borde derecho)
+    for (let x = w - 1; x > Math.floor(w * 0.55); x--) {
+      if (colDensity[x] > densityThreshold) {
+        maxX = Math.min(w - 1, x + 2);
         break;
       }
     }
 
-    // Borde Derecho
-    let maxRight = 0;
-    const rightContrasts = new Float32Array(w);
-    for (let x = Math.floor(w * (1 - margin)); x > Math.floor(w * (1 - searchLimit)); x--) {
-      let c = 0;
-      for (let y = Math.floor(h * 0.15); y < Math.floor(h * 0.85); y += 2) {
-        c += edges[y * w + x];
-      }
-      rightContrasts[x] = c;
-      if (c > maxRight) maxRight = c;
-    }
-    for (let x = Math.floor(w * (1 - margin)); x > Math.floor(w * (1 - searchLimit)); x--) {
-      if (rightContrasts[x] > maxRight * thresholdRatio && rightContrasts[x] > h * 5) {
-        rightX = x;
+    // Buscar minY (borde superior)
+    for (let y = 0; y < Math.floor(h * 0.45); y++) {
+      if (rowDensity[y] > densityThreshold) {
+        minY = Math.max(0, y - 2);
         break;
       }
     }
 
-    // Paso 4: Validar que tenemos dimensiones sensatas
-    const detectedWidth = rightX - leftX;
-    const detectedHeight = bottomY - topY;
-    const minSize = Math.min(w, h) * 0.15; // Mínimo 15% del ancho/alto
-
-    if (detectedWidth < minSize || detectedHeight < minSize) {
-      console.warn('Detected document too small, using default crop');
-      return defaultCrop;
+    // Buscar maxY (borde inferior)
+    for (let y = h - 1; y > Math.floor(h * 0.55); y--) {
+      if (rowDensity[y] > densityThreshold) {
+        maxY = Math.min(h - 1, y + 2);
+        break;
+      }
     }
 
-    // Paso 5: Convertir a coordenadas relativas (0-1)
-    const crop: CropPoints = {
-      topLeft: { x: Number((leftX / w).toFixed(3)), y: Number((topY / h).toFixed(3)) },
-      topRight: { x: Number((rightX / w).toFixed(3)), y: Number((topY / h).toFixed(3)) },
-      bottomLeft: { x: Number((leftX / w).toFixed(3)), y: Number((bottomY / h).toFixed(3)) },
-      bottomRight: { x: Number((rightX / w).toFixed(3)), y: Number((bottomY / h).toFixed(3)) },
+    // 6. Búsqueda de esquinas reales dentro del área acotada
+    let tlX = minX, tlY = minY;
+    let trX = maxX, trY = minY;
+    let blX = minX, blY = maxY;
+    let brX = maxX, brY = maxY;
+
+    let minSumTL = Infinity;
+    let maxDiffTR = -Infinity;
+    let maxSumBR = -Infinity;
+    let minDiffBL = Infinity;
+
+    let foundPoints = 0;
+
+    for (let y = minY; y <= maxY; y += 2) {
+      for (let x = minX; x <= maxX; x += 2) {
+        const idx = y * w + x;
+        if (docMask[idx] === 1 || edges[idx] > 40) {
+          foundPoints++;
+
+          const sum = x + y;
+          const diff = x - y;
+
+          if (sum < minSumTL) {
+            minSumTL = sum;
+            tlX = x;
+            tlY = y;
+          }
+          if (diff > maxDiffTR) {
+            maxDiffTR = diff;
+            trX = x;
+            trY = y;
+          }
+          if (sum > maxSumBR) {
+            maxSumBR = sum;
+            brX = x;
+            brY = y;
+          }
+          if (diff < minDiffBL) {
+            minDiffBL = diff;
+            blX = x;
+            blY = y;
+          }
+        }
+      }
+    }
+
+    // 7. Validación de dimensiones del documento detectado
+    const docW = maxX - minX;
+    const docH = maxY - minY;
+
+    // Si el documento ocupa al menos el 18% del ancho y alto
+    if (docW > w * 0.18 && docH > h * 0.18 && foundPoints > 50) {
+      // Añadir margen de seguridad del 1.5% para no cortar texto
+      const padX = w * 0.015;
+      const padY = h * 0.015;
+
+      const crop: CropPoints = {
+        topLeft: {
+          x: Number(Math.max(0, (Math.min(tlX, minX) - padX) / w).toFixed(3)),
+          y: Number(Math.max(0, (Math.min(tlY, minY) - padY) / h).toFixed(3)),
+        },
+        topRight: {
+          x: Number(Math.min(1, (Math.max(trX, maxX) + padX) / w).toFixed(3)),
+          y: Number(Math.max(0, (Math.min(trY, minY) - padY) / h).toFixed(3)),
+        },
+        bottomLeft: {
+          x: Number(Math.max(0, (Math.min(blX, minX) - padX) / w).toFixed(3)),
+          y: Number(Math.min(1, (Math.max(blY, maxY) + padY) / h).toFixed(3)),
+        },
+        bottomRight: {
+          x: Number(Math.min(1, (Math.max(brX, maxX) + padX) / w).toFixed(3)),
+          y: Number(Math.min(1, (Math.max(brY, maxY) + padY) / h).toFixed(3)),
+        },
+      };
+
+      console.log('Bordes del documento detectados:', crop);
+      return crop;
+    }
+
+    // Fallback: recorte centrado óptimo (enmarca el 80% central del visor)
+    const centeredCrop: CropPoints = {
+      topLeft: { x: 0.1, y: 0.1 },
+      topRight: { x: 0.9, y: 0.1 },
+      bottomLeft: { x: 0.1, y: 0.9 },
+      bottomRight: { x: 0.9, y: 0.9 },
     };
 
-    console.log('Document corners detected:', crop);
-    return crop;
+    return centeredCrop;
   } catch (err) {
     console.warn('Error detectando esquinas automáticamente:', err);
     return defaultCrop;
   }
 }
 
-/**
- * Detecta bordes usando operador Sobel (simple y rápido).
- * Retorna un mapa de magnitudes de borde.
- */
 /**
  * Pipeline de procesamiento automático completo para escaneo rápido.
  * Detecta bordes → recorta perspectiva → mejora imagen (auto-clean) → nitidez.
@@ -878,40 +965,35 @@ export async function autoProcessForScan(
   detectionQuality: 'good' | 'fair' | 'poor';
 }> {
   const defaultCrop: CropPoints = {
-    topLeft: { x: 0.03, y: 0.03 },
-    topRight: { x: 0.97, y: 0.03 },
-    bottomLeft: { x: 0.03, y: 0.97 },
-    bottomRight: { x: 0.97, y: 0.97 },
+    topLeft: { x: 0.05, y: 0.05 },
+    topRight: { x: 0.95, y: 0.05 },
+    bottomLeft: { x: 0.05, y: 0.95 },
+    bottomRight: { x: 0.95, y: 0.95 },
   };
 
   // 1. Detectar esquinas del documento automáticamente
   let cropPoints = defaultCrop;
   let detectionQuality: 'good' | 'fair' | 'poor' = 'poor';
+
   try {
     cropPoints = await detectDocumentCorners(base64);
-    // Evaluar calidad: si los bordes detectados son significativamente distintos al default,
-    // es probable que la detección fue exitosa
-    const marginFromEdge = Math.min(
-      cropPoints.topLeft.x, cropPoints.topLeft.y,
-      1 - cropPoints.topRight.x, cropPoints.topRight.y,
-      cropPoints.bottomLeft.x, 1 - cropPoints.bottomLeft.y,
-      1 - cropPoints.bottomRight.x, 1 - cropPoints.bottomRight.y
-    );
+
     const docWidth = cropPoints.topRight.x - cropPoints.topLeft.x;
     const docHeight = cropPoints.bottomLeft.y - cropPoints.topLeft.y;
-    if (docWidth > 0.5 && docHeight > 0.5 && marginFromEdge > 0.02) {
+
+    if (docWidth > 0.25 && docHeight > 0.25 && (cropPoints.topLeft.x > 0.02 || cropPoints.topRight.x < 0.98)) {
       detectionQuality = 'good';
-    } else if (docWidth > 0.3 && docHeight > 0.3) {
+    } else if (docWidth > 0.2 && docHeight > 0.2) {
       detectionQuality = 'fair';
     }
   } catch {
     cropPoints = defaultCrop;
   }
 
-  // 2. Procesar la imagen con ajustes automáticos óptimos para documentos
+  // 2. Procesar la imagen con recorte y mejoras
   const processedImage = await processPageImage(base64, {
     brightness: 105,
-    contrast: 110,
+    contrast: 112,
     sharpness: mode === 'grayscale' ? 50 : 35,
     filter: mode,
     rotation: 0,
@@ -924,7 +1006,6 @@ export async function autoProcessForScan(
 function detectEdgesSobel(gray: Uint8Array, w: number, h: number): Uint8Array {
   const edges = new Uint8Array(w * h);
 
-  // Kernels de Sobel
   const sobelX = [-1, 0, 1, -2, 0, 2, -1, 0, 1];
   const sobelY = [-1, -2, -1, 0, 0, 0, 1, 2, 1];
 
@@ -948,3 +1029,4 @@ function detectEdgesSobel(gray: Uint8Array, w: number, h: number): Uint8Array {
 
   return edges;
 }
+

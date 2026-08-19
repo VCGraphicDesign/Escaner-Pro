@@ -8,6 +8,7 @@ import { Camera as CameraIcon, RefreshCw, Upload, Image as ImageIcon, ArrowLeft,
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { Capacitor } from '@capacitor/core';
 import { createDefaultAdjustments } from '../../services/documentStore';
+import { detectDocumentCorners, processPageImage } from '../../services/imageProcessor';
 import { ScannedPage } from '../../types';
 import LiveCameraModal from './LiveCameraModal';
 
@@ -22,6 +23,38 @@ export default function CameraView({ onBack, onPagesCaptured }: CameraViewProps)
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isLiveCameraOpen, setIsLiveCameraOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Procesa y agrega una nueva página con detección y recorte automático inmediato
+  const addScannedImage = async (base64: string) => {
+    setIsLoading(true);
+    try {
+      const crop = await detectDocumentCorners(base64);
+      const adjustments = {
+        ...createDefaultAdjustments(),
+        crop,
+        filter: 'auto' as const,
+      };
+      const processed = await processPageImage(base64, adjustments);
+      const newPage: ScannedPage = {
+        id: `page_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        originalImage: base64,
+        processedImage: processed,
+        adjustments,
+      };
+      setSessionPages((prev) => [...prev, newPage]);
+    } catch (err) {
+      console.warn('Error en auto-procesamiento de página:', err);
+      const newPage: ScannedPage = {
+        id: `page_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        originalImage: base64,
+        processedImage: base64,
+        adjustments: createDefaultAdjustments(),
+      };
+      setSessionPages((prev) => [...prev, newPage]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   // Tomar una foto usando la cámara del sistema
   const takeNativePhoto = async () => {
@@ -44,14 +77,7 @@ export default function CameraView({ onBack, onPagesCaptured }: CameraViewProps)
       });
 
       if (image && image.dataUrl) {
-        const newPage: ScannedPage = {
-          id: `page_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-          originalImage: image.dataUrl,
-          processedImage: image.dataUrl,
-          adjustments: createDefaultAdjustments(),
-        };
-
-        setSessionPages((prev) => [...prev, newPage]);
+        await addScannedImage(image.dataUrl);
       }
     } catch (err: any) {
       console.warn('Cámara nativa cancelada o no disponible:', err);
@@ -63,15 +89,9 @@ export default function CameraView({ onBack, onPagesCaptured }: CameraViewProps)
     }
   };
 
-  const handleLiveCapture = (base64Image: string) => {
+  const handleLiveCapture = async (base64Image: string) => {
     setIsLiveCameraOpen(false);
-    const newPage: ScannedPage = {
-      id: `page_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-      originalImage: base64Image,
-      processedImage: base64Image,
-      adjustments: createDefaultAdjustments(),
-    };
-    setSessionPages((prev) => [...prev, newPage]);
+    await addScannedImage(base64Image);
   };
 
   // Abrir la cámara automáticamente al ingresar a la pantalla de escaneo
@@ -86,16 +106,10 @@ export default function CameraView({ onBack, onPagesCaptured }: CameraViewProps)
 
     Array.from(files).forEach((file: any) => {
       const reader = new FileReader();
-      reader.onload = (event) => {
+      reader.onload = async (event) => {
         if (event.target?.result) {
           const base64 = event.target.result as string;
-          const newPage: ScannedPage = {
-            id: `page_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-            originalImage: base64,
-            processedImage: base64,
-            adjustments: createDefaultAdjustments(),
-          };
-          setSessionPages((prev) => [...prev, newPage]);
+          await addScannedImage(base64);
         }
       };
       reader.readAsDataURL(file);
