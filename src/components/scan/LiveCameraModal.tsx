@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { CropPoints } from '../../types';
 import { applyPerspectiveCrop } from '../../services/imageProcessor';
+import { detectOpenCVCorners } from '../../services/opencvDetector';
 
 interface LiveCameraModalProps {
   isOpen: boolean;
@@ -162,78 +163,83 @@ export default function LiveCameraModal({ isOpen, onClose, onCapture }: LiveCame
     const imgData = sampleCtx.getImageData(0, 0, sampleW, sampleH);
     const data = imgData.data;
 
-    // 3. Algoritmo de detección de bordes y densidad de texto/documento mediante gradientes Sobel
-    const totalPixels = sampleW * sampleH;
-    const gray = new Uint8Array(totalPixels);
-    for (let i = 0; i < data.length; i += 4) {
-      gray[i / 4] = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
-    }
-
-    const edges = new Uint8Array(totalPixels);
-    const colEdges = new Uint32Array(sampleW);
-    const rowEdges = new Uint32Array(sampleH);
-
-    for (let y = 1; y < sampleH - 1; y++) {
-      for (let x = 1; x < sampleW - 1; x++) {
-        const idx = y * sampleW + x;
-        const gx = Math.abs(gray[idx + 1] - gray[idx - 1]);
-        const gy = Math.abs(gray[idx + sampleW] - gray[idx - sampleW]);
-        const mag = gx + gy;
-        if (mag > 24) {
-          edges[idx] = mag;
-          colEdges[x]++;
-          rowEdges[y]++;
-        }
-      }
-    }
-
-    // Encontrar densidad máxima de bordes
-    let maxColEdge = 0;
-    for (let x = 0; x < sampleW; x++) if (colEdges[x] > maxColEdge) maxColEdge = colEdges[x];
-    let maxRowEdge = 0;
-    for (let y = 0; y < sampleH; y++) if (rowEdges[y] > maxRowEdge) maxRowEdge = rowEdges[y];
-
-    // Umbral de densidad de bordes del documento
-    const colThresh = Math.max(2, maxColEdge * 0.12);
-    const rowThresh = Math.max(2, maxRowEdge * 0.12);
-
-    let minX = 0, maxX = sampleW - 1, minY = 0, maxY = sampleH - 1;
-
-    for (let x = 0; x < Math.floor(sampleW * 0.45); x++) {
-      if (colEdges[x] >= colThresh) { minX = Math.max(0, x - 1); break; }
-    }
-    for (let x = sampleW - 1; x > Math.floor(sampleW * 0.55); x--) {
-      if (colEdges[x] >= colThresh) { maxX = Math.min(sampleW - 1, x + 1); break; }
-    }
-    for (let y = 0; y < Math.floor(sampleH * 0.45); y++) {
-      if (rowEdges[y] >= rowThresh) { minY = Math.max(0, y - 1); break; }
-    }
-    for (let y = sampleH - 1; y > Math.floor(sampleH * 0.55); y--) {
-      if (rowEdges[y] >= rowThresh) { maxY = Math.min(sampleH - 1, y + 1); break; }
-    }
-
-    const docWidth = maxX - minX;
-    const docHeight = maxY - minY;
-    const isDetected = docWidth > sampleW * 0.15 && docHeight > sampleH * 0.15 && docWidth < sampleW * 0.94 && docHeight < sampleH * 0.94;
-
+    // 3. Detección de Bordes con OpenCV.js (Canny + findContours + approxPolyDP)
+    const openCVCrop = detectOpenCVCorners(sampleCanvas);
     let targetCrop: CropPoints;
-    if (isDetected) {
-      targetCrop = {
-        topLeft: { x: Math.max(0.01, minX / sampleW), y: Math.max(0.01, minY / sampleH) },
-        topRight: { x: Math.min(0.99, maxX / sampleW), y: Math.max(0.01, minY / sampleH) },
-        bottomRight: { x: Math.min(0.99, maxX / sampleW), y: Math.min(0.99, maxY / sampleH) },
-        bottomLeft: { x: Math.max(0.01, minX / sampleW), y: Math.min(0.99, maxY / sampleH) },
-      };
+    let isDetected = false;
+
+    if (openCVCrop) {
+      targetCrop = openCVCrop;
+      isDetected = true;
       setHasDetectedDoc(true);
     } else {
-      // Guía centrada ajustada por defecto
-      targetCrop = {
-        topLeft: { x: 0.15, y: 0.15 },
-        topRight: { x: 0.85, y: 0.15 },
-        bottomRight: { x: 0.85, y: 0.85 },
-        bottomLeft: { x: 0.15, y: 0.85 },
-      };
-      setHasDetectedDoc(false);
+      // Fallback a gradientes Sobel si OpenCV.js aún se está descargando
+      const totalPixels = sampleW * sampleH;
+      const gray = new Uint8Array(totalPixels);
+      for (let i = 0; i < data.length; i += 4) {
+        gray[i / 4] = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
+      }
+
+      const colEdges = new Uint32Array(sampleW);
+      const rowEdges = new Uint32Array(sampleH);
+
+      for (let y = 1; y < sampleH - 1; y++) {
+        for (let x = 1; x < sampleW - 1; x++) {
+          const idx = y * sampleW + x;
+          const gx = Math.abs(gray[idx + 1] - gray[idx - 1]);
+          const gy = Math.abs(gray[idx + sampleW] - gray[idx - sampleW]);
+          const mag = gx + gy;
+          if (mag > 24) {
+            colEdges[x]++;
+            rowEdges[y]++;
+          }
+        }
+      }
+
+      let maxColEdge = 0;
+      for (let x = 0; x < sampleW; x++) if (colEdges[x] > maxColEdge) maxColEdge = colEdges[x];
+      let maxRowEdge = 0;
+      for (let y = 0; y < sampleH; y++) if (rowEdges[y] > maxRowEdge) maxRowEdge = rowEdges[y];
+
+      const colThresh = Math.max(2, maxColEdge * 0.14);
+      const rowThresh = Math.max(2, maxRowEdge * 0.14);
+
+      let minX = 0, maxX = sampleW - 1, minY = 0, maxY = sampleH - 1;
+
+      for (let x = 0; x < Math.floor(sampleW * 0.45); x++) {
+        if (colEdges[x] >= colThresh) { minX = Math.max(0, x - 1); break; }
+      }
+      for (let x = sampleW - 1; x > Math.floor(sampleW * 0.55); x--) {
+        if (colEdges[x] >= colThresh) { maxX = Math.min(sampleW - 1, x + 1); break; }
+      }
+      for (let y = 0; y < Math.floor(sampleH * 0.45); y++) {
+        if (rowEdges[y] >= rowThresh) { minY = Math.max(0, y - 1); break; }
+      }
+      for (let y = sampleH - 1; y > Math.floor(sampleH * 0.55); y--) {
+        if (rowEdges[y] >= rowThresh) { maxY = Math.min(sampleH - 1, y + 1); break; }
+      }
+
+      const docWidth = maxX - minX;
+      const docHeight = maxY - minY;
+      isDetected = docWidth > sampleW * 0.18 && docHeight > sampleH * 0.18 && docWidth < sampleW * 0.94 && docHeight < sampleH * 0.94;
+
+      if (isDetected) {
+        targetCrop = {
+          topLeft: { x: Math.max(0.01, minX / sampleW), y: Math.max(0.01, minY / sampleH) },
+          topRight: { x: Math.min(0.99, maxX / sampleW), y: Math.max(0.01, minY / sampleH) },
+          bottomRight: { x: Math.min(0.99, maxX / sampleW), y: Math.min(0.99, maxY / sampleH) },
+          bottomLeft: { x: Math.max(0.01, minX / sampleW), y: Math.min(0.99, maxY / sampleH) },
+        };
+        setHasDetectedDoc(true);
+      } else {
+        targetCrop = {
+          topLeft: { x: 0.15, y: 0.15 },
+          topRight: { x: 0.85, y: 0.15 },
+          bottomRight: { x: 0.85, y: 0.85 },
+          bottomLeft: { x: 0.15, y: 0.85 },
+        };
+        setHasDetectedDoc(false);
+      }
     }
 
     // 4. Suavizado temporal exponencial (EMA) para eliminar temblores
