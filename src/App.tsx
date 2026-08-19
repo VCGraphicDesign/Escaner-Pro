@@ -19,14 +19,14 @@ export default function App() {
   const [selectedDocument, setSelectedDocument] = useState<DocumentItem | null>(null);
   const [capturedPages, setCapturedPages] = useState<ScannedPage[]>([]);
 
-  // Iniciar el flujo de Escaneo Rápido
-  const handleStartQuickScan = () => {
+  // Iniciar el flujo de Escaneo Inteligente Unificado
+  const handleStartNewScan = () => {
     setSelectedDocument(null);
     setCapturedPages([]);
     setView('quickscan');
   };
 
-  // Recibir páginas ya procesadas del QuickScanView y abrirlas en el editor
+  // Recibir páginas procesadas del Escaneo Inteligente y abrirlas en el editor avanzado
   const handleQuickScanToEditor = (
     processedPages: Array<{ id: string; originalImage: string; processedImage: string }>
   ) => {
@@ -44,20 +44,13 @@ export default function App() {
 
     const newDoc: DocumentItem = {
       id: `doc_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-      name: `Escaneo Rapido ${count}`,
+      name: `Documento ${count}`,
       createdAt: new Date().toISOString(),
       pages: scannedPages,
     };
     saveDocument(newDoc);
     setSelectedDocument(newDoc);
     setView('edit');
-  };
-
-  // 1. Iniciar un nuevo escaneo desde Home
-  const handleStartNewScan = () => {
-    setSelectedDocument(null);
-    setCapturedPages([]);
-    setView('scan');
   };
 
   // 2. Al capturar páginas en la cámara, pasar a limpieza
@@ -116,7 +109,6 @@ export default function App() {
         {view === 'home' && (
           <HomePage
             onStartNewScan={handleStartNewScan}
-            onStartQuickScan={handleStartQuickScan}
             onEditDocument={handleEditDocument}
           />
         )}
