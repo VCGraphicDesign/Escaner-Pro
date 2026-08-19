@@ -35,27 +35,18 @@ export default function CleanPage({ capturedPages, onBack, onFinishCleaning }: C
         capturedPages.map(async (page) => {
           // Si ya tiene puntos de recorte, no los sobreescribimos
           if (page.adjustments.crop) return page;
-          try {
-            // Detectar los bordes/esquinas del documento automáticamente
-            const detectedCrop = await detectDocumentCorners(page.originalImage);
-            return {
-              ...page,
-              adjustments: { ...page.adjustments, crop: detectedCrop },
-            };
-          } catch {
-            return {
-              ...page,
-              adjustments: {
-                ...page.adjustments,
-                crop: {
-                  topLeft: { x: 0.05, y: 0.05 },
-                  topRight: { x: 0.95, y: 0.05 },
-                  bottomLeft: { x: 0.05, y: 0.95 },
-                  bottomRight: { x: 0.95, y: 0.95 },
-                },
+          return {
+            ...page,
+            adjustments: {
+              ...page.adjustments,
+              crop: {
+                topLeft: { x: 0.05, y: 0.05 },
+                topRight: { x: 0.95, y: 0.05 },
+                bottomRight: { x: 0.95, y: 0.95 },
+                bottomLeft: { x: 0.05, y: 0.95 },
               },
-            };
-          }
+            },
+          };
         })
       );
       if (!cancelled) setPages(initialized);
