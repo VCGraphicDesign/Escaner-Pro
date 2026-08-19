@@ -3,7 +3,29 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <script src="https://docs.opencv.org/4.7.0/opencv.js" async></script>
+    <title>Escáner Pro</title>
+    <!-- OpenCV.js: Motor de Visión por Computadora para detección de bordes de documentos en tiempo real -->
+    <script>
+      // Cargamos OpenCV.js de forma diferida y notificamos cuando está listo
+      function loadOpenCV() {
+        var script = document.createElement('script');
+        script.src = 'https://docs.opencv.org/4.7.0/opencv.js';
+        script.async = true;
+        script.onload = function() {
+          if (window.cv && window.cv.then) {
+            window.cv.then(function(cv) {
+              window.cv = cv;
+            });
+          }
+        };
+        document.head.appendChild(script);
+      }
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', loadOpenCV);
+      } else {
+        loadOpenCV();
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>
