@@ -19,6 +19,7 @@ interface CameraViewProps {
 export default function CameraView({ onBack, onPagesCaptured }: CameraViewProps) {
   const [sessionPages, setSessionPages] = useState<ScannedPage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isLiveCameraOpen, setIsLiveCameraOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
