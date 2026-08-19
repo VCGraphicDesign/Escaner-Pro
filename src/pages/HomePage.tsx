@@ -184,8 +184,8 @@ export default function HomePage({ onStartNewScan, onEditDocument }: HomePagePro
         </button>
       </div>
 
-      {/* Botón Flotante de Acción (FAB) Unificado */}
-      {activeTab === 'documents' && (
+      {/* Botón Flotante de Acción (FAB) Unificado - Solo cuando hay documentos listados */}
+      {activeTab === 'documents' && filteredDocs.length > 0 && (
         <button
           id="fab-scan-btn"
           onClick={onStartNewScan}
