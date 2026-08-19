@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { Capacitor } from '@capacitor/core';
-import { autoProcessForScan } from '../../services/imageProcessor';
+import { autoProcessForScan, processPageImage } from '../../services/imageProcessor';
 import { quickExportPDF } from '../../services/pdfGenerator';
 import LiveCameraModal from './LiveCameraModal';
 
@@ -70,21 +70,38 @@ export default function QuickScanView({ onBack, onSavedToEditor }: QuickScanView
   const [isLiveCameraOpen, setIsLiveCameraOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const processImage = useCallback(async (pageId: string, base64: string, mode: ScanMode) => {
+  const processImage = useCallback(async (pageId: string, base64: string, mode: ScanMode, isPreCropped: boolean = false) => {
     setPages((prev) =>
       prev.map((p) => (p.id === pageId ? { ...p, status: 'processing' } : p))
     );
     try {
-      const result = await autoProcessForScan(base64, mode);
+      let processedImage: string;
+      let detectionQuality: 'good' | 'fair' | 'poor' = 'good';
+
+      if (isPreCropped) {
+        processedImage = await processPageImage(base64, {
+          brightness: 105,
+          contrast: 112,
+          sharpness: mode === 'grayscale' ? 50 : 35,
+          filter: mode,
+          rotation: 0,
+          crop: null,
+        });
+      } else {
+        const result = await autoProcessForScan(base64, mode);
+        processedImage = result.processedImage;
+        detectionQuality = result.detectionQuality;
+      }
+
       setPages((prev) =>
         prev.map((p) =>
           p.id === pageId
-            ? { ...p, processedBase64: result.processedImage, detectionQuality: result.detectionQuality, status: 'done' }
+            ? { ...p, processedBase64: processedImage, detectionQuality, status: 'done' }
             : p
         )
       );
     } catch (err) {
-      console.error('Error al procesar pagina:', err);
+      console.error('Error al procesar página:', err);
       setPages((prev) =>
         prev.map((p) =>
           p.id === pageId ? { ...p, status: 'error', processedBase64: base64 } : p
@@ -93,17 +110,17 @@ export default function QuickScanView({ onBack, onSavedToEditor }: QuickScanView
     }
   }, []);
 
-  const addAndProcessImage = useCallback(async (base64: string, mode: ScanMode) => {
+  const addAndProcessImage = useCallback(async (base64: string, mode: ScanMode, isPreCropped: boolean = false) => {
     const id = `qpage_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     const newPage: ScannedQuickPage = {
       id,
       originalBase64: base64,
       processedBase64: null,
-      detectionQuality: 'poor',
+      detectionQuality: isPreCropped ? 'good' : 'poor',
       status: 'pending',
     };
     setPages((prev) => [...prev, newPage]);
-    await processImage(id, base64, mode);
+    await processImage(id, base64, mode, isPreCropped);
   }, [processImage]);
 
   const takePhoto = async () => {
@@ -138,7 +155,7 @@ export default function QuickScanView({ onBack, onSavedToEditor }: QuickScanView
 
   const handleLiveCapture = async (base64Image: string) => {
     setIsLiveCameraOpen(false);
-    await addAndProcessImage(base64Image, scanMode);
+    await addAndProcessImage(base64Image, scanMode, true);
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {

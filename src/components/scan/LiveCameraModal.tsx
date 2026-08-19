@@ -162,76 +162,76 @@ export default function LiveCameraModal({ isOpen, onClose, onCapture }: LiveCame
     const imgData = sampleCtx.getImageData(0, 0, sampleW, sampleH);
     const data = imgData.data;
 
-    // 3. Algoritmo de detección de bordes y superficie de papel
+    // 3. Algoritmo de detección de bordes y densidad de texto/documento mediante gradientes Sobel
     const totalPixels = sampleW * sampleH;
     const gray = new Uint8Array(totalPixels);
-    const histogram = new Uint32Array(256);
-
     for (let i = 0; i < data.length; i += 4) {
-      const g = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
-      const idx = i / 4;
-      gray[idx] = g;
-      histogram[g]++;
+      gray[i / 4] = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
     }
 
-    // Umbral de Otsu
-    let sumTotal = 0;
-    for (let i = 0; i < 256; i++) sumTotal += i * histogram[i];
-    let sumB = 0, wB = 0, maxVar = 0, threshold = 128;
+    const edges = new Uint8Array(totalPixels);
+    const colEdges = new Uint32Array(sampleW);
+    const rowEdges = new Uint32Array(sampleH);
 
-    for (let t = 0; t < 256; t++) {
-      wB += histogram[t];
-      if (wB === 0) continue;
-      const wF = totalPixels - wB;
-      if (wF === 0) break;
-      sumB += t * histogram[t];
-      const mB = sumB / wB;
-      const mF = (sumTotal - sumB) / wF;
-      const v = wB * wF * (mB - mF) * (mB - mF);
-      if (v > maxVar) {
-        maxVar = v;
-        threshold = t;
-      }
-    }
-
-    // Búsqueda de contorno del documento
-    let minX = sampleW, maxX = 0, minY = sampleH, maxY = 0;
-    let foundCount = 0;
-
-    for (let y = 2; y < sampleH - 2; y += 2) {
-      for (let x = 2; x < sampleW - 2; x += 2) {
+    for (let y = 1; y < sampleH - 1; y++) {
+      for (let x = 1; x < sampleW - 1; x++) {
         const idx = y * sampleW + x;
-        // Pixel de papel/documento
-        if (gray[idx] >= threshold - 15) {
-          foundCount++;
-          if (x < minX) minX = x;
-          if (x > maxX) maxX = x;
-          if (y < minY) minY = y;
-          if (y > maxY) maxY = y;
+        const gx = Math.abs(gray[idx + 1] - gray[idx - 1]);
+        const gy = Math.abs(gray[idx + sampleW] - gray[idx - sampleW]);
+        const mag = gx + gy;
+        if (mag > 24) {
+          edges[idx] = mag;
+          colEdges[x]++;
+          rowEdges[y]++;
         }
       }
     }
 
+    // Encontrar densidad máxima de bordes
+    let maxColEdge = 0;
+    for (let x = 0; x < sampleW; x++) if (colEdges[x] > maxColEdge) maxColEdge = colEdges[x];
+    let maxRowEdge = 0;
+    for (let y = 0; y < sampleH; y++) if (rowEdges[y] > maxRowEdge) maxRowEdge = rowEdges[y];
+
+    // Umbral de densidad de bordes del documento
+    const colThresh = Math.max(2, maxColEdge * 0.12);
+    const rowThresh = Math.max(2, maxRowEdge * 0.12);
+
+    let minX = 0, maxX = sampleW - 1, minY = 0, maxY = sampleH - 1;
+
+    for (let x = 0; x < Math.floor(sampleW * 0.45); x++) {
+      if (colEdges[x] >= colThresh) { minX = Math.max(0, x - 1); break; }
+    }
+    for (let x = sampleW - 1; x > Math.floor(sampleW * 0.55); x--) {
+      if (colEdges[x] >= colThresh) { maxX = Math.min(sampleW - 1, x + 1); break; }
+    }
+    for (let y = 0; y < Math.floor(sampleH * 0.45); y++) {
+      if (rowEdges[y] >= rowThresh) { minY = Math.max(0, y - 1); break; }
+    }
+    for (let y = sampleH - 1; y > Math.floor(sampleH * 0.55); y--) {
+      if (rowEdges[y] >= rowThresh) { maxY = Math.min(sampleH - 1, y + 1); break; }
+    }
+
     const docWidth = maxX - minX;
     const docHeight = maxY - minY;
-    const isDetected = docWidth > sampleW * 0.22 && docHeight > sampleH * 0.22 && foundCount > 40;
+    const isDetected = docWidth > sampleW * 0.15 && docHeight > sampleH * 0.15 && docWidth < sampleW * 0.94 && docHeight < sampleH * 0.94;
 
     let targetCrop: CropPoints;
     if (isDetected) {
       targetCrop = {
-        topLeft: { x: Math.max(0.02, minX / sampleW), y: Math.max(0.02, minY / sampleH) },
-        topRight: { x: Math.min(0.98, maxX / sampleW), y: Math.max(0.02, minY / sampleH) },
-        bottomRight: { x: Math.min(0.98, maxX / sampleW), y: Math.min(0.98, maxY / sampleH) },
-        bottomLeft: { x: Math.max(0.02, minX / sampleW), y: Math.min(0.98, maxY / sampleH) },
+        topLeft: { x: Math.max(0.01, minX / sampleW), y: Math.max(0.01, minY / sampleH) },
+        topRight: { x: Math.min(0.99, maxX / sampleW), y: Math.max(0.01, minY / sampleH) },
+        bottomRight: { x: Math.min(0.99, maxX / sampleW), y: Math.min(0.99, maxY / sampleH) },
+        bottomLeft: { x: Math.max(0.01, minX / sampleW), y: Math.min(0.99, maxY / sampleH) },
       };
       setHasDetectedDoc(true);
     } else {
-      // Guía centrada por defecto
+      // Guía centrada ajustada por defecto
       targetCrop = {
-        topLeft: { x: 0.12, y: 0.1 },
-        topRight: { x: 0.88, y: 0.1 },
-        bottomRight: { x: 0.88, y: 0.9 },
-        bottomLeft: { x: 0.12, y: 0.9 },
+        topLeft: { x: 0.15, y: 0.15 },
+        topRight: { x: 0.85, y: 0.15 },
+        bottomRight: { x: 0.85, y: 0.85 },
+        bottomLeft: { x: 0.15, y: 0.85 },
       };
       setHasDetectedDoc(false);
     }
