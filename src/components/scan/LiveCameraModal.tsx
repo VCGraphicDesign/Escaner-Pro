@@ -243,7 +243,7 @@ export default function LiveCameraModal({ isOpen, onClose, onCapture }: LiveCame
     }
 
     // 4. Suavizado temporal exponencial (EMA) para eliminar temblores
-    const alpha = 0.55;
+    const alpha = 0.25;
     const cur = currentCropRef.current;
     cur.topLeft.x = cur.topLeft.x * (1 - alpha) + targetCrop.topLeft.x * alpha;
     cur.topLeft.y = cur.topLeft.y * (1 - alpha) + targetCrop.topLeft.y * alpha;
