@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Camera, Settings, Sparkles, HelpCircle, FileText, Wrench } from 'lucide-react';
+import { Camera, Sparkles, HelpCircle, FileText, Wrench, Zap } from 'lucide-react';
 import { DocumentItem } from '../types';
 import { getDocuments, deleteDocument, duplicateDocument, renameDocument } from '../services/documentStore';
 import { generatePDF } from '../services/pdfGenerator';
@@ -15,10 +15,11 @@ import ToolsTab from '../components/home/ToolsTab';
 
 interface HomePageProps {
   onStartNewScan: () => void;
+  onStartQuickScan: () => void;
   onEditDocument: (doc: DocumentItem) => void;
 }
 
-export default function HomePage({ onStartNewScan, onEditDocument }: HomePageProps) {
+export default function HomePage({ onStartNewScan, onStartQuickScan, onEditDocument }: HomePageProps) {
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [showHelp, setShowHelp] = useState(false);
@@ -186,14 +187,30 @@ export default function HomePage({ onStartNewScan, onEditDocument }: HomePagePro
 
       {/* Botón Flotante de Acción (FAB) - Solo visible en pestaña de Documentos */}
       {activeTab === 'documents' && (
-        <button
-          id="fab-scan-btn"
-          onClick={onStartNewScan}
-          className="absolute bottom-20 right-6 w-14 h-14 bg-[#2979FF] hover:bg-[#2979FF]/90 text-white rounded-full flex items-center justify-center shadow-xl shadow-[#2979FF]/30 hover:scale-105 active:scale-95 transition-all z-20"
-          title="Escanear nuevo documento"
-        >
-          <Camera size={24} />
-        </button>
+        <div className="absolute bottom-20 right-4 flex flex-col items-end gap-2.5 z-20">
+          {/* Botón secundario: Escaneo Rápido */}
+          <button
+            id="fab-quickscan-btn"
+            onClick={onStartQuickScan}
+            className="flex items-center gap-2 pl-3 pr-4 h-10 bg-[#1C1C1E] hover:bg-[#2C2C2E] border border-[#3C3C3E] text-white rounded-full shadow-lg shadow-black/30 hover:scale-105 active:scale-95 transition-all"
+            title="Escaneo Rápido con detección automática"
+          >
+            <div className="w-5 h-5 rounded-full bg-gradient-to-br from-[#7C5CFC] to-[#5B8DEF] flex items-center justify-center">
+              <Zap size={11} className="text-white" />
+            </div>
+            <span className="text-xs font-bold text-gray-200">Escaneo Rápido</span>
+          </button>
+
+          {/* FAB principal: Escanear nuevo */}
+          <button
+            id="fab-scan-btn"
+            onClick={onStartNewScan}
+            className="w-14 h-14 bg-[#2979FF] hover:bg-[#2979FF]/90 text-white rounded-full flex items-center justify-center shadow-xl shadow-[#2979FF]/30 hover:scale-105 active:scale-95 transition-all"
+            title="Escanear nuevo documento"
+          >
+            <Camera size={24} />
+          </button>
+        </div>
       )}
     </div>
   );

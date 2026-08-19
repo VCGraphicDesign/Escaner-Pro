@@ -864,6 +864,63 @@ export async function detectDocumentCorners(originalBase64: string): Promise<Cro
  * Detecta bordes usando operador Sobel (simple y rápido).
  * Retorna un mapa de magnitudes de borde.
  */
+/**
+ * Pipeline de procesamiento automático completo para escaneo rápido.
+ * Detecta bordes → recorta perspectiva → mejora imagen (auto-clean) → nitidez.
+ * Retorna: { processedImage, cropPoints, detectionQuality }
+ */
+export async function autoProcessForScan(
+  base64: string,
+  mode: 'auto' | 'grayscale' | 'enhanced' = 'auto'
+): Promise<{
+  processedImage: string;
+  cropPoints: CropPoints;
+  detectionQuality: 'good' | 'fair' | 'poor';
+}> {
+  const defaultCrop: CropPoints = {
+    topLeft: { x: 0.03, y: 0.03 },
+    topRight: { x: 0.97, y: 0.03 },
+    bottomLeft: { x: 0.03, y: 0.97 },
+    bottomRight: { x: 0.97, y: 0.97 },
+  };
+
+  // 1. Detectar esquinas del documento automáticamente
+  let cropPoints = defaultCrop;
+  let detectionQuality: 'good' | 'fair' | 'poor' = 'poor';
+  try {
+    cropPoints = await detectDocumentCorners(base64);
+    // Evaluar calidad: si los bordes detectados son significativamente distintos al default,
+    // es probable que la detección fue exitosa
+    const marginFromEdge = Math.min(
+      cropPoints.topLeft.x, cropPoints.topLeft.y,
+      1 - cropPoints.topRight.x, cropPoints.topRight.y,
+      cropPoints.bottomLeft.x, 1 - cropPoints.bottomLeft.y,
+      1 - cropPoints.bottomRight.x, 1 - cropPoints.bottomRight.y
+    );
+    const docWidth = cropPoints.topRight.x - cropPoints.topLeft.x;
+    const docHeight = cropPoints.bottomLeft.y - cropPoints.topLeft.y;
+    if (docWidth > 0.5 && docHeight > 0.5 && marginFromEdge > 0.02) {
+      detectionQuality = 'good';
+    } else if (docWidth > 0.3 && docHeight > 0.3) {
+      detectionQuality = 'fair';
+    }
+  } catch {
+    cropPoints = defaultCrop;
+  }
+
+  // 2. Procesar la imagen con ajustes automáticos óptimos para documentos
+  const processedImage = await processPageImage(base64, {
+    brightness: 105,
+    contrast: 110,
+    sharpness: mode === 'grayscale' ? 50 : 35,
+    filter: mode,
+    rotation: 0,
+    crop: cropPoints,
+  });
+
+  return { processedImage, cropPoints, detectionQuality };
+}
+
 function detectEdgesSobel(gray: Uint8Array, w: number, h: number): Uint8Array {
   const edges = new Uint8Array(w * h);
 

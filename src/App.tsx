@@ -7,16 +7,51 @@ import React, { useState } from 'react';
 import { DocumentItem, ScannedPage } from './types';
 import HomePage from './pages/HomePage';
 import CameraView from './components/scan/CameraView';
+import QuickScanView from './components/scan/QuickScanView';
 import CleanPage from './pages/CleanPage';
 import EditPage from './pages/EditPage';
-import { saveDocument } from './services/documentStore';
+import { saveDocument, createDefaultAdjustments } from './services/documentStore';
 
-type ViewState = 'home' | 'scan' | 'clean' | 'edit';
+type ViewState = 'home' | 'scan' | 'quickscan' | 'clean' | 'edit';
 
 export default function App() {
   const [view, setView] = useState<ViewState>('home');
   const [selectedDocument, setSelectedDocument] = useState<DocumentItem | null>(null);
   const [capturedPages, setCapturedPages] = useState<ScannedPage[]>([]);
+
+  // Iniciar el flujo de Escaneo Rápido
+  const handleStartQuickScan = () => {
+    setSelectedDocument(null);
+    setCapturedPages([]);
+    setView('quickscan');
+  };
+
+  // Recibir páginas ya procesadas del QuickScanView y abrirlas en el editor
+  const handleQuickScanToEditor = (
+    processedPages: Array<{ id: string; originalImage: string; processedImage: string }>
+  ) => {
+    const scannedPages: ScannedPage[] = processedPages.map((p) => ({
+      id: p.id,
+      originalImage: p.originalImage,
+      processedImage: p.processedImage,
+      adjustments: createDefaultAdjustments(),
+    }));
+    setCapturedPages(scannedPages);
+
+    const documentCount = localStorage.getItem('escaner_pro_documents_count') || '1';
+    const count = parseInt(documentCount, 10);
+    localStorage.setItem('escaner_pro_documents_count', (count + 1).toString());
+
+    const newDoc: DocumentItem = {
+      id: `doc_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      name: `Escaneo Rapido ${count}`,
+      createdAt: new Date().toISOString(),
+      pages: scannedPages,
+    };
+    saveDocument(newDoc);
+    setSelectedDocument(newDoc);
+    setView('edit');
+  };
 
   // 1. Iniciar un nuevo escaneo desde Home
   const handleStartNewScan = () => {
@@ -81,6 +116,7 @@ export default function App() {
         {view === 'home' && (
           <HomePage
             onStartNewScan={handleStartNewScan}
+            onStartQuickScan={handleStartQuickScan}
             onEditDocument={handleEditDocument}
           />
         )}
@@ -89,6 +125,13 @@ export default function App() {
           <CameraView
             onBack={() => setView('home')}
             onPagesCaptured={handlePagesCaptured}
+          />
+        )}
+
+        {view === 'quickscan' && (
+          <QuickScanView
+            onBack={() => setView('home')}
+            onSavedToEditor={handleQuickScanToEditor}
           />
         )}
 

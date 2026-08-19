@@ -85,3 +85,93 @@ export async function generatePDF(
     pdf.save(finalName);
   }
 }
+
+/**
+ * Exportación rápida a PDF desde imágenes base64 directas (sin ScannedPage).
+ * Preserva la proporción de aspecto de cada imagen ajustándola al tamaño de página A4.
+ * Ideal para el flujo de Escaneo Rápido donde las imágenes ya fueron procesadas.
+ */
+export async function quickExportPDF(
+  documentName: string,
+  processedImages: string[]
+): Promise<void> {
+  if (processedImages.length === 0) return;
+
+  const pdf = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4',
+  });
+
+  const A4_W = 210;
+  const A4_H = 297;
+  const MARGIN = 5; // mm de margen
+
+  for (let i = 0; i < processedImages.length; i++) {
+    const base64 = processedImages[i];
+
+    if (i > 0) {
+      pdf.addPage('a4', 'portrait');
+    }
+
+    // Detectar dimensiones de la imagen para preservar aspecto
+    await new Promise<void>((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const imgW = img.naturalWidth;
+        const imgH = img.naturalHeight;
+        const aspectRatio = imgW / imgH;
+
+        // Calcular dimensiones respetando los márgenes
+        const maxW = A4_W - MARGIN * 2;
+        const maxH = A4_H - MARGIN * 2;
+
+        let destW = maxW;
+        let destH = destW / aspectRatio;
+
+        if (destH > maxH) {
+          destH = maxH;
+          destW = destH * aspectRatio;
+        }
+
+        const offsetX = MARGIN + (maxW - destW) / 2;
+        const offsetY = MARGIN + (maxH - destH) / 2;
+
+        pdf.addImage(base64, 'JPEG', offsetX, offsetY, destW, destH, undefined, 'FAST');
+        resolve();
+      };
+      img.onerror = () => {
+        // Fallback: imagen a pantalla completa
+        pdf.addImage(base64, 'JPEG', 0, 0, A4_W, A4_H, undefined, 'FAST');
+        resolve();
+      };
+      img.src = base64;
+    });
+  }
+
+  const finalName = documentName.endsWith('.pdf') ? documentName : `${documentName}.pdf`;
+
+  if (Capacitor.isNativePlatform()) {
+    try {
+      const pdfDataUri = pdf.output('datauristring');
+      const base64Data = pdfDataUri.split(',')[1];
+      const savedFile = await Filesystem.writeFile({
+        path: finalName,
+        data: base64Data,
+        directory: Directory.Documents,
+        recursive: true,
+      });
+      await Share.share({
+        title: documentName,
+        text: `Documento PDF generado con Escáner Pro: ${documentName}`,
+        url: savedFile.uri,
+        dialogTitle: 'Guardar o Compartir PDF',
+      });
+    } catch (err) {
+      console.error('Error al guardar o compartir PDF nativo:', err);
+      pdf.save(finalName);
+    }
+  } else {
+    pdf.save(finalName);
+  }
+}
