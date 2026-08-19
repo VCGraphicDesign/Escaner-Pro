@@ -22,8 +22,10 @@ import {
   Wand2,
 } from 'lucide-react';
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
+import { Capacitor } from '@capacitor/core';
 import { autoProcessForScan } from '../../services/imageProcessor';
 import { quickExportPDF } from '../../services/pdfGenerator';
+import LiveCameraModal from './LiveCameraModal';
 
 type ScanMode = 'auto' | 'grayscale' | 'enhanced';
 type PageStatus = 'pending' | 'processing' | 'done' | 'error';
@@ -65,6 +67,7 @@ export default function QuickScanView({ onBack, onSavedToEditor }: QuickScanView
   });
   const [showNameInput, setShowNameInput] = useState(false);
   const [exportSuccess, setExportSuccess] = useState(false);
+  const [isLiveCameraOpen, setIsLiveCameraOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const processImage = useCallback(async (pageId: string, base64: string, mode: ScanMode) => {
@@ -104,6 +107,13 @@ export default function QuickScanView({ onBack, onSavedToEditor }: QuickScanView
   }, [processImage]);
 
   const takePhoto = async () => {
+    // Si estamos en un navegador (notebook / PC / web), abrimos la cámara en vivo WebRTC
+    if (!Capacitor.isNativePlatform()) {
+      setIsLiveCameraOpen(true);
+      return;
+    }
+
+    // En app nativa móvil (Android/iOS), usamos la cámara nativa de Capacitor
     setIsCapturing(true);
     try {
       const image = await Camera.getPhoto({
@@ -118,11 +128,17 @@ export default function QuickScanView({ onBack, onSavedToEditor }: QuickScanView
       }
     } catch (err: any) {
       if (err?.message !== 'User cancelled photos app' && err !== 'User cancelled photos app') {
-        console.warn('Camara no disponible:', err);
+        console.warn('Cámara nativa no disponible, recurriendo a cámara web:', err);
+        setIsLiveCameraOpen(true);
       }
     } finally {
       setIsCapturing(false);
     }
+  };
+
+  const handleLiveCapture = async (base64Image: string) => {
+    setIsLiveCameraOpen(false);
+    await addAndProcessImage(base64Image, scanMode);
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -490,6 +506,13 @@ export default function QuickScanView({ onBack, onSavedToEditor }: QuickScanView
 
       {/* CSS animations inline */}
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+
+      {/* Modal de Cámara en Vivo para Notebook / WebRTC */}
+      <LiveCameraModal
+        isOpen={isLiveCameraOpen}
+        onClose={() => setIsLiveCameraOpen(false)}
+        onCapture={handleLiveCapture}
+      />
 
       <input ref={fileInputRef} type="file" accept="image/*" multiple onChange={handleFileChange} style={{ display: 'none' }} />
     </div>

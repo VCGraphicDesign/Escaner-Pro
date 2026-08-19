@@ -6,8 +6,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Camera as CameraIcon, RefreshCw, Upload, Image as ImageIcon, ArrowLeft, Check, Plus, AlertCircle } from 'lucide-react';
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
+import { Capacitor } from '@capacitor/core';
 import { createDefaultAdjustments } from '../../services/documentStore';
 import { ScannedPage } from '../../types';
+import LiveCameraModal from './LiveCameraModal';
 
 interface CameraViewProps {
   onBack: () => void;
@@ -17,12 +19,17 @@ interface CameraViewProps {
 export default function CameraView({ onBack, onPagesCaptured }: CameraViewProps) {
   const [sessionPages, setSessionPages] = useState<ScannedPage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-
+  const [isLiveCameraOpen, setIsLiveCameraOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Tomar una foto usando la cámara nativa del sistema (Capacitor Camera)
+  // Tomar una foto usando la cámara del sistema
   const takeNativePhoto = async () => {
+    // Si estamos en un notebook o navegador web, abrimos el visor de cámara en vivo WebRTC
+    if (!Capacitor.isNativePlatform()) {
+      setIsLiveCameraOpen(true);
+      return;
+    }
+
     setIsLoading(true);
     setErrorMsg(null);
 
@@ -47,13 +54,23 @@ export default function CameraView({ onBack, onPagesCaptured }: CameraViewProps)
       }
     } catch (err: any) {
       console.warn('Cámara nativa cancelada o no disponible:', err);
-      // Si el usuario simplemente canceló la foto, no mostramos mensaje de error
       if (err?.message !== 'User cancelled photos app' && err !== 'User cancelled photos app') {
-        setErrorMsg('No se pudo acceder a la cámara nativa. Puedes seleccionar una foto desde tu galería abajo.');
+        setIsLiveCameraOpen(true);
       }
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleLiveCapture = (base64Image: string) => {
+    setIsLiveCameraOpen(false);
+    const newPage: ScannedPage = {
+      id: `page_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      originalImage: base64Image,
+      processedImage: base64Image,
+      adjustments: createDefaultAdjustments(),
+    };
+    setSessionPages((prev) => [...prev, newPage]);
   };
 
   // Abrir la cámara automáticamente al ingresar a la pantalla de escaneo
@@ -194,6 +211,13 @@ export default function CameraView({ onBack, onPagesCaptured }: CameraViewProps)
           </div>
         )}
       </div>
+
+      {/* Modal de Cámara en Vivo WebRTC para Notebook / Web */}
+      <LiveCameraModal
+        isOpen={isLiveCameraOpen}
+        onClose={() => setIsLiveCameraOpen(false)}
+        onCapture={handleLiveCapture}
+      />
 
       {/* Input de archivo oculto para la galería */}
       <input
