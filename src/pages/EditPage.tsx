@@ -484,18 +484,26 @@ export default function EditPage({ document: initialDoc, onBack, onNavigateToCle
           }
         }
 
-        // 3. Quemar anotaciones de texto
+        // 3. Quemar anotaciones de texto en ultra-alta resolución
         for (const annot of page.adjustments.annotations || []) {
-          const fontSizeInCanvas = Math.round((annot.fontSize / 100) * canvas.width);
-          ctx.font = `bold ${fontSizeInCanvas}px sans-serif`;
+          // Escalar fuente respecto a la proporción real del canvas
+          const fontSizeInCanvas = Math.max(20, Math.round((annot.fontSize / 340) * canvas.width));
+          ctx.font = `bold ${fontSizeInCanvas}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
 
           const xPos = (annot.x / 100) * canvas.width;
           const yPos = (annot.y / 100) * canvas.height;
 
-          // Fondo blanco semitransparente para legibilidad
-          ctx.fillStyle = 'rgba(255,255,255,0.85)';
-          const textWidth = ctx.measureText(annot.text).width;
-          ctx.fillRect(xPos - textWidth / 2 - 6, yPos - fontSizeInCanvas / 2 - 6, textWidth + 12, fontSizeInCanvas + 12);
+          // Fondo blanco con esquinas sutiles para legibilidad
+          ctx.fillStyle = 'rgba(255,255,255,0.92)';
+          const textMetrics = ctx.measureText(annot.text);
+          const padX = fontSizeInCanvas * 0.3;
+          const padY = fontSizeInCanvas * 0.2;
+          ctx.fillRect(
+            xPos - textMetrics.width / 2 - padX,
+            yPos - fontSizeInCanvas / 2 - padY,
+            textMetrics.width + padX * 2,
+            fontSizeInCanvas + padY * 2
+          );
 
           ctx.fillStyle = annot.color;
           ctx.textAlign = 'center';
@@ -505,7 +513,7 @@ export default function EditPage({ document: initialDoc, onBack, onNavigateToCle
 
         return {
           ...page,
-          processedImage: canvas.toDataURL('image/jpeg', 0.95),
+          processedImage: canvas.toDataURL('image/jpeg', 0.98),
         };
       })
     );

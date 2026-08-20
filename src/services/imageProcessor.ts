@@ -127,7 +127,7 @@ export async function processPageImage(
     // Ignorar si el modelo no está presente
   }
 
-  return canvas.toDataURL('image/jpeg', 0.85);
+  return canvas.toDataURL('image/jpeg', 0.98);
 }
 
 /**

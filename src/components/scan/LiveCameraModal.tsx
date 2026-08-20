@@ -54,8 +54,8 @@ export default function LiveCameraModal({ isOpen, onClose, onCapture }: LiveCame
 
         const constraints: MediaStreamConstraints = {
           video: deviceId
-            ? { deviceId: { exact: deviceId }, width: { ideal: 1920 }, height: { ideal: 1080 } }
-            : { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+            ? { deviceId: { exact: deviceId }, width: { ideal: 3840, min: 1280 }, height: { ideal: 2160, min: 720 } }
+            : { facingMode: { ideal: 'environment' }, width: { ideal: 3840, min: 1280 }, height: { ideal: 2160, min: 720 } },
           audio: false,
         };
 
@@ -139,8 +139,8 @@ export default function LiveCameraModal({ isOpen, onClose, onCapture }: LiveCame
 
     fullCtx.drawImage(video, 0, 0, fullCanvas.width, fullCanvas.height);
 
-    // 2. Exportar la imagen en alta calidad
-    const base64Image = fullCanvas.toDataURL('image/jpeg', 0.95);
+    // 2. Exportar la imagen en ultra-alta calidad sin compresión destructiva
+    const base64Image = fullCanvas.toDataURL('image/jpeg', 0.98);
 
     // 3. Detener stream y enviar la imagen capturada
     stopStream();
