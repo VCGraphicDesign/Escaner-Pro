@@ -11,31 +11,31 @@ import {
   Upload,
   Zap,
   CheckCircle2,
-  AlertCircle,
-  XCircle,
-  RefreshCw,
   Trash2,
   Plus,
   Download,
   Loader2,
   ScanLine,
-  Wand2,
+  Crop,
+  Check,
+  X,
+  Maximize2,
 } from 'lucide-react';
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { Capacitor } from '@capacitor/core';
-import { autoProcessForScan, processPageImage } from '../../services/imageProcessor';
+import { processPageImage } from '../../services/imageProcessor';
 import { quickExportPDF } from '../../services/pdfGenerator';
+import { CropPoints } from '../../types';
 import LiveCameraModal from './LiveCameraModal';
+import CropTool from '../clean/CropTool';
 
 type ScanMode = 'auto' | 'grayscale' | 'enhanced';
 type PageStatus = 'pending' | 'processing' | 'done' | 'error';
-type DetectionQuality = 'good' | 'fair' | 'poor';
 
 interface ScannedQuickPage {
   id: string;
   originalBase64: string;
   processedBase64: string | null;
-  detectionQuality: DetectionQuality;
   status: PageStatus;
 }
 
@@ -44,17 +44,18 @@ interface QuickScanViewProps {
   onSavedToEditor: (pages: Array<{ id: string; originalImage: string; processedImage: string }>) => void;
 }
 
-const QUALITY_LABEL: Record<DetectionQuality, { label: string; color: string; icon: React.ReactNode }> = {
-  good: { label: 'Bordes detectados', color: 'text-emerald-400', icon: <CheckCircle2 size={11} /> },
-  fair: { label: 'Deteccion parcial', color: 'text-amber-400', icon: <AlertCircle size={11} /> },
-  poor: { label: 'Sin deteccion', color: 'text-red-400', icon: <XCircle size={11} /> },
-};
-
 const MODE_OPTIONS: { value: ScanMode; label: string; desc: string }[] = [
-  { value: 'auto', label: 'Auto', desc: 'Iluminacion + color' },
-  { value: 'grayscale', label: 'B/N', desc: 'Texto nitido' },
-  { value: 'enhanced', label: 'Color Pro', desc: 'Contraste vivido' },
+  { value: 'auto', label: 'Auto', desc: 'Iluminación + color' },
+  { value: 'grayscale', label: 'B/N', desc: 'Texto nítido' },
+  { value: 'enhanced', label: 'Color Pro', desc: 'Contraste vívido' },
 ];
+
+const DEFAULT_CROP: CropPoints = {
+  topLeft: { x: 0.05, y: 0.05 },
+  topRight: { x: 0.95, y: 0.05 },
+  bottomRight: { x: 0.95, y: 0.95 },
+  bottomLeft: { x: 0.05, y: 0.95 },
+};
 
 export default function QuickScanView({ onBack, onSavedToEditor }: QuickScanViewProps) {
   const [pages, setPages] = useState<ScannedQuickPage[]>([]);
@@ -68,84 +69,112 @@ export default function QuickScanView({ onBack, onSavedToEditor }: QuickScanView
   const [showNameInput, setShowNameInput] = useState(false);
   const [exportSuccess, setExportSuccess] = useState(false);
   const [isLiveCameraOpen, setIsLiveCameraOpen] = useState(false);
+
+  // Estados para el Recorte Inmediato (Directo al capturar o subir)
+  const [pendingCropImage, setPendingCropImage] = useState<string | null>(null);
+  const [currentCropPoints, setCurrentCropPoints] = useState<CropPoints>(DEFAULT_CROP);
+  const [editingPageId, setEditingPageId] = useState<string | null>(null);
+  const [imageQueue, setImageQueue] = useState<string[]>([]);
+  const [isProcessingCrop, setIsProcessingCrop] = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const processImage = useCallback(async (pageId: string, base64: string, mode: ScanMode, isPreCropped: boolean = false) => {
-    setPages((prev) =>
-      prev.map((p) => (p.id === pageId ? { ...p, status: 'processing' } : p))
-    );
-    try {
-      let processedImage: string;
-      let detectionQuality: 'good' | 'fair' | 'poor' = 'good';
+  // Iniciar flujo de recorte inmediato para una imagen
+  const openImmediateCrop = (base64Image: string, pageIdToEdit: string | null = null) => {
+    setPendingCropImage(base64Image);
+    setCurrentCropPoints(DEFAULT_CROP);
+    setEditingPageId(pageIdToEdit);
+  };
 
-      if (isPreCropped) {
-        processedImage = await processPageImage(base64, {
-          brightness: 105,
-          contrast: 112,
-          sharpness: mode === 'grayscale' ? 50 : 35,
-          filter: mode,
-          rotation: 0,
-          crop: null,
-        });
+  // Confirmar y aplicar recorte a la imagen actual
+  const handleConfirmCrop = async (useFullImage: boolean = false) => {
+    if (!pendingCropImage) return;
+    setIsProcessingCrop(true);
+
+    try {
+      const cropToApply = useFullImage ? null : currentCropPoints;
+      const processedImage = await processPageImage(pendingCropImage, {
+        brightness: 105,
+        contrast: 112,
+        sharpness: scanMode === 'grayscale' ? 50 : 35,
+        filter: scanMode,
+        rotation: 0,
+        crop: cropToApply,
+      });
+
+      if (editingPageId) {
+        // Re-ajustando página existente
+        setPages((prev) =>
+          prev.map((p) =>
+            p.id === editingPageId
+              ? { ...p, processedBase64: processedImage, status: 'done' }
+              : p
+          )
+        );
       } else {
-        const result = await autoProcessForScan(base64, mode);
-        processedImage = result.processedImage;
-        detectionQuality = result.detectionQuality;
+        // Nueva página escaneada
+        const newPage: ScannedQuickPage = {
+          id: `qpage_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          originalBase64: pendingCropImage,
+          processedBase64: processedImage,
+          status: 'done',
+        };
+        setPages((prev) => [...prev, newPage]);
       }
 
-      setPages((prev) =>
-        prev.map((p) =>
-          p.id === pageId
-            ? { ...p, processedBase64: processedImage, detectionQuality, status: 'done' }
-            : p
-        )
-      );
+      // Si quedan imágenes en cola, abrir la siguiente
+      if (imageQueue.length > 0) {
+        const nextImage = imageQueue[0];
+        setImageQueue((prev) => prev.slice(1));
+        setPendingCropImage(nextImage);
+        setCurrentCropPoints(DEFAULT_CROP);
+        setEditingPageId(null);
+      } else {
+        setPendingCropImage(null);
+        setEditingPageId(null);
+      }
     } catch (err) {
-      console.error('Error al procesar página:', err);
-      setPages((prev) =>
-        prev.map((p) =>
-          p.id === pageId ? { ...p, status: 'error', processedBase64: base64 } : p
-        )
-      );
+      console.error('Error aplicando recorte:', err);
+    } finally {
+      setIsProcessingCrop(false);
     }
-  }, []);
+  };
 
-  const addAndProcessImage = useCallback(async (base64: string, mode: ScanMode, isPreCropped: boolean = false) => {
-    const id = `qpage_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-    const newPage: ScannedQuickPage = {
-      id,
-      originalBase64: base64,
-      processedBase64: null,
-      detectionQuality: isPreCropped ? 'good' : 'poor',
-      status: 'pending',
-    };
-    setPages((prev) => [...prev, newPage]);
-    await processImage(id, base64, mode, isPreCropped);
-  }, [processImage]);
+  // Cancelar el recorte actual
+  const handleCancelCrop = () => {
+    if (imageQueue.length > 0) {
+      const nextImage = imageQueue[0];
+      setImageQueue((prev) => prev.slice(1));
+      setPendingCropImage(nextImage);
+      setCurrentCropPoints(DEFAULT_CROP);
+      setEditingPageId(null);
+    } else {
+      setPendingCropImage(null);
+      setEditingPageId(null);
+    }
+  };
 
   const takePhoto = async () => {
-    // Si estamos en un navegador (notebook / PC / web), abrimos la cámara en vivo WebRTC
     if (!Capacitor.isNativePlatform()) {
       setIsLiveCameraOpen(true);
       return;
     }
 
-    // En app nativa móvil (Android/iOS), usamos la cámara nativa de Capacitor
     setIsCapturing(true);
     try {
       const image = await Camera.getPhoto({
-        quality: 92,
+        quality: 95,
         allowEditing: false,
         resultType: CameraResultType.DataUrl,
         source: CameraSource.Camera,
         correctOrientation: true,
       });
       if (image?.dataUrl) {
-        await addAndProcessImage(image.dataUrl, scanMode);
+        openImmediateCrop(image.dataUrl);
       }
     } catch (err: any) {
       if (err?.message !== 'User cancelled photos app' && err !== 'User cancelled photos app') {
-        console.warn('Cámara nativa no disponible, recurriendo a cámara web:', err);
+        console.warn('Cámara nativa no disponible, abriendo cámara web:', err);
         setIsLiveCameraOpen(true);
       }
     } finally {
@@ -153,9 +182,10 @@ export default function QuickScanView({ onBack, onSavedToEditor }: QuickScanView
     }
   };
 
-  const handleLiveCapture = async (base64Image: string) => {
+  const handleLiveCapture = (base64Image: string) => {
     setIsLiveCameraOpen(false);
-    await addAndProcessImage(base64Image, scanMode, true);
+    // Abrir recorte inmediatamente al tomar la foto
+    openImmediateCrop(base64Image);
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -164,6 +194,7 @@ export default function QuickScanView({ onBack, onSavedToEditor }: QuickScanView
     const fileArray: File[] = Array.from(files);
     e.target.value = '';
 
+    const loadedImages: string[] = [];
     for (const file of fileArray) {
       try {
         const base64 = await new Promise<string>((resolve, reject) => {
@@ -173,18 +204,20 @@ export default function QuickScanView({ onBack, onSavedToEditor }: QuickScanView
           reader.readAsDataURL(file);
         });
         if (base64) {
-          await addAndProcessImage(base64, scanMode, true);
+          loadedImages.push(base64);
         }
       } catch (err) {
         console.error('Error cargando archivo:', err);
       }
     }
-  };
 
-  const retryPage = async (pageId: string) => {
-    const page = pages.find((p) => p.id === pageId);
-    if (!page) return;
-    await processImage(pageId, page.originalBase64, scanMode);
+    if (loadedImages.length > 0) {
+      // Iniciar recorte de la primera imagen inmediatamente y encolar las restantes
+      const first = loadedImages[0];
+      const rest = loadedImages.slice(1);
+      setImageQueue(rest);
+      openImmediateCrop(first);
+    }
   };
 
   const removePage = (pageId: string) => {
@@ -220,8 +253,7 @@ export default function QuickScanView({ onBack, onSavedToEditor }: QuickScanView
   };
 
   const doneCount = pages.filter((p) => p.status === 'done').length;
-  const processingCount = pages.filter((p) => p.status === 'processing').length;
-  const canExport = doneCount > 0 && processingCount === 0;
+  const canExport = doneCount > 0;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#0A0A0F', color: 'white', overflow: 'hidden', position: 'relative' }}>
@@ -233,9 +265,9 @@ export default function QuickScanView({ onBack, onSavedToEditor }: QuickScanView
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <Zap size={14} style={{ color: '#7C5CFC' }} />
-            <span style={{ fontSize: 14, fontWeight: 700, letterSpacing: '0.05em' }}>Escaneo Rapido</span>
+            <span style={{ fontSize: 14, fontWeight: 700, letterSpacing: '0.05em' }}>Escaneo Rápido</span>
           </div>
-          <span style={{ fontSize: 10, color: '#6b7280', fontWeight: 500 }}>Deteccion automatica · PDF directo</span>
+          <span style={{ fontSize: 10, color: '#6b7280', fontWeight: 500 }}>Recorte directo · PDF unificado</span>
         </div>
         <button
           disabled={!canExport}
@@ -282,18 +314,13 @@ export default function QuickScanView({ onBack, onSavedToEditor }: QuickScanView
       <div style={{ flex: 1, overflowY: 'auto', padding: pages.length > 0 ? '16px 16px 140px' : '16px' }}>
         {pages.length === 0 ? (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '80%', gap: 24, textAlign: 'center', padding: '32px 24px' }}>
-            <div style={{ position: 'relative' }}>
-              <div style={{ width: 96, height: 96, borderRadius: 28, background: 'linear-gradient(135deg, rgba(124,92,252,0.15), rgba(91,141,239,0.15))', border: '1px solid rgba(124,92,252,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <Wand2 size={40} style={{ color: '#7C5CFC' }} />
-              </div>
-              <div style={{ position: 'absolute', bottom: -8, right: -8, width: 32, height: 32, background: '#7C5CFC', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 12px rgba(124,92,252,0.5)' }}>
-                <Zap size={14} style={{ color: 'white' }} />
-              </div>
+            <div style={{ width: 96, height: 96, borderRadius: 28, background: 'linear-gradient(135deg, rgba(124,92,252,0.15), rgba(91,141,239,0.15))', border: '1px solid rgba(124,92,252,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Crop size={40} style={{ color: '#7C5CFC' }} />
             </div>
             <div>
-              <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Escaneo con IA Automatica</h3>
+              <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Escanear Documento</h3>
               <p style={{ fontSize: 12, color: '#9ca3af', lineHeight: 1.6, maxWidth: 280 }}>
-                Toma una foto o carga imagenes desde la galeria. El sistema detectara los bordes del documento, corregira la perspectiva y mejorara la calidad automaticamente.
+                Toma una foto o sube una imagen de tu galería para recortar y mejorar la página con control total.
               </p>
             </div>
             <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 280 }}>
@@ -303,7 +330,7 @@ export default function QuickScanView({ onBack, onSavedToEditor }: QuickScanView
                 style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '16px', background: 'linear-gradient(135deg, #7C5CFC, #5B8DEF)', color: 'white', fontWeight: 700, borderRadius: 18, border: 'none', cursor: isCapturing ? 'not-allowed' : 'pointer', fontSize: 14, boxShadow: '0 8px 20px rgba(124,92,252,0.35)' }}
               >
                 {isCapturing ? <Loader2 size={18} style={{ animation: 'spin 1s linear infinite' }} /> : <CameraIcon size={18} />}
-                {isCapturing ? 'Abriendo camara...' : 'Escanear con Camara'}
+                {isCapturing ? 'Abriendo cámara...' : 'Escanear con Cámara'}
               </button>
               <button
                 onClick={() => fileInputRef.current?.click()}
@@ -313,131 +340,66 @@ export default function QuickScanView({ onBack, onSavedToEditor }: QuickScanView
                 Cargar desde galería
               </button>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, width: '100%', maxWidth: 280, marginTop: 8 }}>
-              {[
-                { icon: '🔍', label: 'Deteccion\nde bordes' },
-                { icon: '✂️', label: 'Recorte\nautomatico' },
-                { icon: '✨', label: 'Mejora\nde imagen' },
-              ].map((f) => (
-                <div key={f.label} style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: 14, padding: 10, textAlign: 'center' }}>
-                  <div style={{ fontSize: 20, marginBottom: 4 }}>{f.icon}</div>
-                  <div style={{ fontSize: 9, color: '#6b7280', fontWeight: 500, lineHeight: 1.3, whiteSpace: 'pre-line' }}>{f.label}</div>
-                </div>
-              ))}
-            </div>
           </div>
         ) : (
           <div>
             {/* Stats */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, padding: '0 4px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, padding: '0 4px' }}>
               <span style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                {pages.length} {pages.length === 1 ? 'pagina' : 'paginas'}
+                {pages.length} {pages.length === 1 ? 'página' : 'páginas'} escaneada{pages.length !== 1 ? 's' : ''}
               </span>
-              {processingCount > 0 && (
-                <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: '#7C5CFC', fontWeight: 600 }}>
-                  <Loader2 size={10} style={{ animation: 'spin 1s linear infinite' }} />
-                  Procesando {processingCount}...
-                </span>
-              )}
-              {doneCount > 0 && processingCount === 0 && (
-                <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: '#34d399', fontWeight: 600 }}>
-                  <CheckCircle2 size={10} />
-                  {doneCount} lista{doneCount !== 1 ? 's' : ''}
-                </span>
-              )}
             </div>
 
-            {/* Grid de paginas */}
+            {/* Grid de páginas */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12 }}>
-              {pages.map((page, idx) => {
-                const quality = QUALITY_LABEL[page.detectionQuality];
-                return (
-                  <div
-                    key={page.id}
-                    style={{ position: 'relative', aspectRatio: '3/4', background: '#111118', borderRadius: 18, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.08)' }}
-                  >
-                    {/* Imagen */}
-                    {page.processedBase64 ? (
-                      <img src={page.processedBase64} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt={`Pagina ${idx + 1}`} />
-                    ) : page.originalBase64 ? (
-                      <img src={page.originalBase64} style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0.3 }} alt={`Original ${idx + 1}`} />
-                    ) : (
-                      <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <FileText size={32} style={{ color: '#374151' }} />
-                      </div>
-                    )}
-
-                    {/* Overlay procesando */}
-                    {page.status === 'processing' && (
-                      <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-                        <div style={{ position: 'relative', width: 48, height: 48 }}>
-                          <div style={{ position: 'absolute', inset: 0, borderRadius: '50%', border: '2px solid rgba(124,92,252,0.2)', borderTop: '2px solid #7C5CFC', animation: 'spin 0.8s linear infinite' }} />
-                          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                            <Wand2 size={16} style={{ color: '#7C5CFC' }} />
-                          </div>
-                        </div>
-                        <span style={{ fontSize: 9, color: '#A388FF', fontWeight: 600, letterSpacing: '0.05em' }}>Procesando...</span>
-                        <span style={{ fontSize: 8, color: 'rgba(163,136,255,0.6)' }}>Detectando bordes</span>
-                      </div>
-                    )}
-
-                    {/* Overlay error */}
-                    {page.status === 'error' && (
-                      <div style={{ position: 'absolute', inset: 0, background: 'rgba(127,29,29,0.6)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-                        <XCircle size={24} style={{ color: '#f87171' }} />
-                        <span style={{ fontSize: 9, color: '#fca5a5', fontWeight: 600 }}>Error</span>
-                        <button onClick={() => retryPage(page.id)} style={{ fontSize: 9, background: 'rgba(239,68,68,0.3)', padding: '4px 8px', borderRadius: 8, color: '#fecaca', fontWeight: 700, border: 'none', cursor: 'pointer' }}>
-                          Reintentar
-                        </button>
-                      </div>
-                    )}
-
-                    {/* Badge numero */}
-                    <div style={{ position: 'absolute', top: 8, left: 8, background: '#7C5CFC', color: 'white', fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.3)' }}>
-                      {idx + 1}
+              {pages.map((page, idx) => (
+                <div
+                  key={page.id}
+                  style={{ position: 'relative', aspectRatio: '3/4', background: '#111118', borderRadius: 18, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.08)' }}
+                >
+                  {/* Imagen */}
+                  {page.processedBase64 ? (
+                    <img src={page.processedBase64} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt={`Página ${idx + 1}`} />
+                  ) : (
+                    <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <FileText size={32} style={{ color: '#374151' }} />
                     </div>
+                  )}
 
-                    {/* Badge calidad */}
-                    {page.status === 'done' && (
-                      <div style={{ position: 'absolute', top: 8, right: 8, display: 'flex', alignItems: 'center', gap: 3, background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)', padding: '2px 6px', borderRadius: 8 }}>
-                        <span style={{ color: page.detectionQuality === 'good' ? '#34d399' : page.detectionQuality === 'fair' ? '#fbbf24' : '#f87171', display: 'flex' }}>
-                          {quality.icon}
-                        </span>
-                        <span style={{ fontSize: 8, fontWeight: 600, color: page.detectionQuality === 'good' ? '#34d399' : page.detectionQuality === 'fair' ? '#fbbf24' : '#f87171' }}>
-                          {quality.label}
-                        </span>
-                      </div>
-                    )}
-
-                    {/* Acciones */}
-                    <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: 8, display: 'flex', gap: 6, background: 'linear-gradient(to top, rgba(0,0,0,0.8), transparent)', paddingTop: 24 }}>
-                      <button
-                        onClick={() => retryPage(page.id)}
-                        disabled={page.status === 'processing'}
-                        style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, background: 'rgba(124,92,252,0.75)', color: 'white', padding: '6px', borderRadius: 10, fontSize: 9, fontWeight: 700, border: 'none', cursor: page.status === 'processing' ? 'not-allowed' : 'pointer', opacity: page.status === 'processing' ? 0.4 : 1 }}
-                      >
-                        <RefreshCw size={9} />
-                        Re-procesar
-                      </button>
-                      <button
-                        onClick={() => removePage(page.id)}
-                        style={{ padding: 6, background: 'rgba(239,68,68,0.7)', borderRadius: 10, color: 'white', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                      >
-                        <Trash2 size={12} />
-                      </button>
-                    </div>
+                  {/* Badge número */}
+                  <div style={{ position: 'absolute', top: 8, left: 8, background: '#7C5CFC', color: 'white', fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.3)' }}>
+                    {idx + 1}
                   </div>
-                );
-              })}
 
-              {/* Celda añadir */}
+                  {/* Acciones directas sobre la página */}
+                  <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: 8, display: 'flex', gap: 6, background: 'linear-gradient(to top, rgba(0,0,0,0.85), transparent)', paddingTop: 24 }}>
+                    <button
+                      onClick={() => openImmediateCrop(page.originalBase64, page.id)}
+                      style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, background: '#2979FF', color: 'white', padding: '6px', borderRadius: 10, fontSize: 10, fontWeight: 700, border: 'none', cursor: 'pointer' }}
+                      title="Re-ajustar recorte"
+                    >
+                      <Crop size={11} />
+                      Recortar
+                    </button>
+                    <button
+                      onClick={() => removePage(page.id)}
+                      style={{ padding: 6, background: 'rgba(239,68,68,0.8)', borderRadius: 10, color: 'white', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                      title="Eliminar página"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+
+              {/* Celda añadir más */}
               <button
                 onClick={takePhoto}
-                disabled={isCapturing || processingCount > 0}
-                style={{ aspectRatio: '3/4', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, background: 'rgba(255,255,255,0.03)', border: '1px dashed rgba(255,255,255,0.15)', borderRadius: 18, color: '#6b7280', cursor: (isCapturing || processingCount > 0) ? 'not-allowed' : 'pointer', opacity: (isCapturing || processingCount > 0) ? 0.4 : 1, transition: 'all 0.15s' }}
+                disabled={isCapturing}
+                style={{ aspectRatio: '3/4', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, background: 'rgba(255,255,255,0.03)', border: '1px dashed rgba(255,255,255,0.15)', borderRadius: 18, color: '#6b7280', cursor: isCapturing ? 'not-allowed' : 'pointer', transition: 'all 0.15s' }}
               >
                 {isCapturing ? <Loader2 size={22} style={{ color: '#7C5CFC', animation: 'spin 1s linear infinite' }} /> : <Plus size={22} />}
-                <span style={{ fontSize: 10, fontWeight: 600 }}>{isCapturing ? 'Abriendo...' : 'Anadir pagina'}</span>
+                <span style={{ fontSize: 10, fontWeight: 600 }}>{isCapturing ? 'Abriendo...' : 'Añadir página'}</span>
               </button>
             </div>
           </div>
@@ -448,7 +410,7 @@ export default function QuickScanView({ onBack, onSavedToEditor }: QuickScanView
       {pages.length > 0 && (
         <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, background: 'rgba(17,17,24,0.97)', backdropFilter: 'blur(20px)', borderTop: '1px solid rgba(255,255,255,0.05)', padding: 16, display: 'flex', flexDirection: 'column', gap: 10, zIndex: 30 }}>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={takePhoto} disabled={isCapturing || processingCount > 0} style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: 12, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 14, fontSize: 12, fontWeight: 600, color: '#e5e7eb', cursor: (isCapturing || processingCount > 0) ? 'not-allowed' : 'pointer', opacity: (isCapturing || processingCount > 0) ? 0.5 : 1 }}>
+            <button onClick={takePhoto} disabled={isCapturing} style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: 12, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 14, fontSize: 12, fontWeight: 600, color: '#e5e7eb', cursor: isCapturing ? 'not-allowed' : 'pointer' }}>
               {isCapturing ? <Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} /> : <CameraIcon size={15} />}
               Otra foto
             </button>
@@ -456,12 +418,10 @@ export default function QuickScanView({ onBack, onSavedToEditor }: QuickScanView
               <Upload size={15} />
               Galería
             </button>
-            {doneCount > 0 && (
-              <button onClick={handleSendToEditor} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: 12, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 14, fontSize: 12, fontWeight: 600, color: '#d1d5db', cursor: 'pointer' }} title="Enviar al editor completo">
-                <FileText size={15} />
-                Editor
-              </button>
-            )}
+            <button onClick={handleSendToEditor} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: 12, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 14, fontSize: 12, fontWeight: 600, color: '#d1d5db', cursor: 'pointer' }} title="Enviar al editor avanzado">
+              <FileText size={15} />
+              Editor
+            </button>
           </div>
 
           <button
@@ -486,9 +446,73 @@ export default function QuickScanView({ onBack, onSavedToEditor }: QuickScanView
             ) : exportSuccess ? (
               <><CheckCircle2 size={18} /> PDF guardado exitosamente</>
             ) : (
-              <><Download size={18} /> Guardar como PDF ({doneCount} {doneCount === 1 ? 'pagina' : 'paginas'})</>
+              <><Download size={18} /> Guardar como PDF ({doneCount} {doneCount === 1 ? 'página' : 'páginas'})</>
             )}
           </button>
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* MODAL DE RECORTE INMEDIATO (4 LÍNEAS COMPLETAS + 4 ESQUINAS) */}
+      {/* ======================================================== */}
+      {pendingCropImage && (
+        <div className="fixed inset-0 z-50 bg-[#09090D] flex flex-col justify-between select-none animate-fade-in">
+          {/* Header del Recorte */}
+          <div className="w-full flex items-center justify-between px-4 py-3 bg-[#111118] border-b border-white/10 shrink-0">
+            <button
+              onClick={handleCancelCrop}
+              className="p-2 text-gray-400 hover:text-white rounded-full hover:bg-white/10 transition-all cursor-pointer"
+              title="Cancelar"
+            >
+              <X size={20} />
+            </button>
+
+            <div className="flex flex-col items-center">
+              <span className="text-sm font-bold text-white">Ajustar Recorte</span>
+              <span className="text-[10px] text-gray-400">Arrastra las líneas o esquinas</span>
+            </div>
+
+            <button
+              onClick={() => handleConfirmCrop(true)}
+              className="flex items-center gap-1 text-xs font-semibold text-[#2979FF] hover:text-[#5B8DEF] px-3 py-1.5 rounded-lg hover:bg-[#2979FF]/10 transition-all cursor-pointer"
+              title="Usar imagen completa sin recortar"
+            >
+              <Maximize2 size={13} />
+              Completa
+            </button>
+          </div>
+
+          {/* Visor interactivo de recorte con 8 controles */}
+          <div className="flex-1 w-full h-full p-2 flex items-center justify-center overflow-hidden">
+            <CropTool
+              imageUrl={pendingCropImage}
+              cropPoints={currentCropPoints}
+              onChange={(newPoints) => setCurrentCropPoints(newPoints)}
+            />
+          </div>
+
+          {/* Barra inferior de confirmación de recorte */}
+          <div className="w-full p-4 bg-[#111118] border-t border-white/10 flex items-center gap-3 shrink-0">
+            <button
+              onClick={handleCancelCrop}
+              className="flex-1 py-3.5 px-4 rounded-xl text-xs font-semibold text-gray-300 bg-white/5 hover:bg-white/10 active:scale-95 transition-all cursor-pointer border border-white/10"
+            >
+              Cancelar
+            </button>
+
+            <button
+              onClick={() => handleConfirmCrop(false)}
+              disabled={isProcessingCrop}
+              className="flex-[2] py-3.5 px-4 rounded-xl text-xs font-bold text-white bg-[#2979FF] hover:bg-[#1E6BE6] active:scale-95 transition-all cursor-pointer shadow-lg shadow-[#2979FF]/30 flex items-center justify-center gap-2"
+            >
+              {isProcessingCrop ? (
+                <Loader2 size={16} className="animate-spin" />
+              ) : (
+                <Check size={16} />
+              )}
+              {isProcessingCrop ? 'Procesando...' : 'Confirmar Recorte'}
+            </button>
+          </div>
         </div>
       )}
 
@@ -510,7 +534,7 @@ export default function QuickScanView({ onBack, onSavedToEditor }: QuickScanView
               autoFocus
             />
             <div style={{ fontSize: 10, color: '#6b7280', marginTop: -8, paddingLeft: 4 }}>
-              Se guardara como <span style={{ color: '#d1d5db', fontFamily: 'monospace' }}>{pdfName}.pdf</span>
+              Se guardará como <span style={{ color: '#d1d5db', fontFamily: 'monospace' }}>{pdfName}.pdf</span>
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
               <button onClick={() => setShowNameInput(false)} style={{ flex: 1, padding: 12, background: 'rgba(255,255,255,0.05)', borderRadius: 14, fontSize: 12, fontWeight: 600, color: '#9ca3af', border: 'none', cursor: 'pointer' }}>
@@ -532,7 +556,7 @@ export default function QuickScanView({ onBack, onSavedToEditor }: QuickScanView
       {/* CSS animations inline */}
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
 
-      {/* Modal de Cámara en Vivo para Notebook / WebRTC */}
+      {/* Modal de Cámara Web */}
       <LiveCameraModal
         isOpen={isLiveCameraOpen}
         onClose={() => setIsLiveCameraOpen(false)}
