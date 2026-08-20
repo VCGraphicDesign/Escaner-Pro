@@ -24,6 +24,9 @@ import {
   ZoomIn,
   ZoomOut,
   X,
+  Eye,
+  Droplet,
+  Zap,
 } from 'lucide-react';
 import { DocumentItem, ScannedPage, Annotation, ImageOverlay } from '../types';
 import { saveDocument } from '../services/documentStore';
@@ -45,6 +48,7 @@ export default function EditPage({ document: initialDoc, onBack, onNavigateToCle
   const [activeTab, setActiveTab] = useState<TabType>('pages');
   const [showSaveSheet, setShowSaveSheet] = useState(false);
   const [isRotating, setIsRotating] = useState(false);
+  const [isApplyingFilter, setIsApplyingFilter] = useState(false);
 
   // Estados de Anotación de Texto
   const [textToInput, setTextToInput] = useState('');
@@ -148,6 +152,37 @@ export default function EditPage({ document: initialDoc, onBack, onNavigateToCle
       console.error('Error rotando página:', err);
     } finally {
       setIsRotating(false);
+    }
+  };
+
+  // ----------------------------------------------------
+  // CAMBIAR FILTRO PROFESIONAL EN TIEMPO REAL
+  // ----------------------------------------------------
+  const handleChangeFilter = async (filterType: 'original' | 'auto' | 'grayscale' | 'enhanced' | 'restore') => {
+    if (!currentPage || isApplyingFilter) return;
+    setIsApplyingFilter(true);
+
+    try {
+      const updatedAdjustments = {
+        ...currentPage.adjustments,
+        filter: filterType,
+      };
+
+      const newProcessed = await processPageImage(currentPage.originalImage, updatedAdjustments);
+
+      const nextPages = [...doc.pages];
+      nextPages[currentIndex] = {
+        ...currentPage,
+        processedImage: newProcessed,
+        adjustments: updatedAdjustments,
+      };
+
+      const nextDoc = { ...doc, pages: nextPages };
+      pushState(nextDoc);
+    } catch (err) {
+      console.error('Error aplicando filtro:', err);
+    } finally {
+      setIsApplyingFilter(false);
     }
   };
 
@@ -828,23 +863,73 @@ export default function EditPage({ document: initialDoc, onBack, onNavigateToCle
           </div>
         )}
 
-        {/* Pestaña: Recorte y Filtros */}
+        {/* Pestaña: Filtros Profesionales (5 Opciones Directas) */}
         {activeTab === 'filter' && (
-          <div className="flex flex-col gap-3 animate-fade-in text-center py-2">
-            <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wider block text-left mb-1">
-              Recorte y Filtros de Imagen
-            </span>
-            <p className="text-[11px] text-gray-400 text-left mb-2">
-              Ajusta los filtros de procesamiento (Color Pro, Sin Arrugas, Gris) o modifica el marco de recorte.
-            </p>
-            <button
-              id="btn-edit-clean-shortcut"
-              onClick={() => onNavigateToClean(doc.pages)}
-              className="flex items-center justify-center gap-1.5 py-3 bg-[#2979FF]/15 hover:bg-[#2979FF]/25 border border-[#2979FF]/40 text-[#2979FF] rounded-xl text-xs font-bold transition-all cursor-pointer"
-            >
-              <Sliders size={14} />
-              Abrir Ajustes de Filtros y Recorte
-            </button>
+          <div className="flex flex-col gap-2.5 animate-fade-in">
+            <div className="flex items-center justify-between text-[11px] font-bold text-gray-400 uppercase tracking-wider px-1">
+              <span>Filtros de Procesamiento</span>
+              {isApplyingFilter && (
+                <span className="text-[#2979FF] flex items-center gap-1 text-[10px] font-bold">
+                  <Loader2 size={12} className="animate-spin" /> Aplicando...
+                </span>
+              )}
+            </div>
+
+            <div className="grid grid-cols-5 gap-1.5">
+              {[
+                {
+                  id: 'restore' as const,
+                  name: 'Sin Arrugas',
+                  desc: 'Limpia pliegues',
+                  icon: <Sparkles size={16} />,
+                },
+                {
+                  id: 'original' as const,
+                  name: 'Original',
+                  desc: 'Foto limpia',
+                  icon: <Eye size={16} />,
+                },
+                {
+                  id: 'auto' as const,
+                  name: 'Auto',
+                  desc: 'Equilibrio luz',
+                  icon: <Zap size={16} />,
+                },
+                {
+                  id: 'grayscale' as const,
+                  name: 'B/N',
+                  desc: 'Texto nítido',
+                  icon: <Sliders size={16} />,
+                },
+                {
+                  id: 'enhanced' as const,
+                  name: 'Color Pro',
+                  desc: 'Vívido y brillo',
+                  icon: <Droplet size={16} />,
+                },
+              ].map((f) => {
+                const isActive = (currentPage?.adjustments.filter || 'original') === f.id;
+                return (
+                  <button
+                    key={f.id}
+                    id={`filter-btn-${f.id}`}
+                    disabled={isApplyingFilter}
+                    onClick={() => handleChangeFilter(f.id)}
+                    className={`flex flex-col items-center justify-center p-2 rounded-xl border transition-all text-center cursor-pointer ${
+                      isActive
+                        ? 'bg-[#2979FF]/20 border-[#2979FF] text-[#2979FF] shadow-md shadow-[#2979FF]/20 scale-105'
+                        : 'bg-[#2C2C2E] border-[#3C3C3E] text-gray-300 hover:border-gray-500'
+                    }`}
+                  >
+                    <div className={`p-1.5 rounded-lg mb-1 ${isActive ? 'bg-[#2979FF] text-white' : 'bg-black/30 text-gray-400'}`}>
+                      {f.icon}
+                    </div>
+                    <span className="text-[10px] font-bold leading-tight">{f.name}</span>
+                    <span className="text-[8px] text-gray-400 leading-tight truncate max-w-[55px]">{f.desc}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         )}
 

@@ -373,25 +373,11 @@ export function applyAdaptiveThreshold(canvas: HTMLCanvasElement) {
 }
 
 /**
- * Escala de grises simple.
+ * Blanco y Negro (B/N) Documental de Alto Contraste:
+ * Convierte el documento a blanco y negro nítido con fondo blanco puro y texto negro sólido.
  */
 export function applyGrayscale(canvas: HTMLCanvasElement) {
-  const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  if (!ctx) return;
-
-  const w = canvas.width;
-  const h = canvas.height;
-  const imgData = ctx.getImageData(0, 0, w, h);
-  const data = imgData.data;
-
-  for (let i = 0; i < data.length; i += 4) {
-    const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-    data[i] = gray;
-    data[i + 1] = gray;
-    data[i + 2] = gray;
-  }
-
-  ctx.putImageData(imgData, 0, 0);
+  applyAdaptiveThreshold(canvas);
 }
 
 /**
