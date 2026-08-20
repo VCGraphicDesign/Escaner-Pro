@@ -19,6 +19,14 @@ export interface CropPoints {
   bottomRight: { x: number; y: number };
 }
 
+export interface ImageOverlay {
+  id: string;
+  imageBase64: string;
+  x: number; // percentage 0-100
+  y: number; // percentage 0-100
+  width: number; // percentage 10-80
+}
+
 export interface PageAdjustment {
   brightness: number; // 50 to 150 (percentage, default 100)
   contrast: number; // 50 to 150 (percentage, default 100)
@@ -27,6 +35,7 @@ export interface PageAdjustment {
   rotation: number; // 0, 90, 180, 270 degrees
   crop: CropPoints | null;
   annotations: Annotation[];
+  overlays?: ImageOverlay[];
 }
 
 export interface ScannedPage {
