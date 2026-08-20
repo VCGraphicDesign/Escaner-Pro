@@ -373,11 +373,55 @@ export function applyAdaptiveThreshold(canvas: HTMLCanvasElement) {
 }
 
 /**
- * Blanco y Negro (B/N) Documental de Alto Contraste:
- * Convierte el documento a blanco y negro nítido con fondo blanco puro y texto negro sólido.
+ * Blanco y Negro / Escala de Grises Documental para Impresión:
+ * Convierte cualquier texto (rojo, azul, negro, verde) en trazos oscuros y nítidos
+ * sobre un fondo de papel blanco limpio, ideal para imprimir con tinta negra sin distorsiones ni inversiones.
  */
 export function applyGrayscale(canvas: HTMLCanvasElement) {
-  applyAdaptiveThreshold(canvas);
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return;
+
+  const w = canvas.width;
+  const h = canvas.height;
+  const imgData = ctx.getImageData(0, 0, w, h);
+  const data = imgData.data;
+
+  // 1. Calcular luminancia ponderada por saturación para asegurar que textos de color se lean oscuros
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+
+    // Luminancia estándar
+    const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+
+    // Calcular saturación para evitar que textos a color (rojo/azul) salgan demasiado claros
+    const maxVal = Math.max(r, g, b);
+    const minVal = Math.min(r, g, b);
+    const sat = maxVal === 0 ? 0 : (maxVal - minVal) / maxVal;
+
+    // Ponderación de tinta: el color saturado se oscurece ligeramente para que sea legible como tinta negra
+    let gray = lum - (sat * 25);
+
+    // Curva de contraste documental suave: fondo blanco limpio (>215 -> 255), texto oscuro (<160 -> más oscuro)
+    if (gray >= 215) {
+      gray = 255;
+    } else if (gray <= 160) {
+      // Estirar texto hacia negros
+      gray = Math.max(0, (gray / 160) * 120);
+    } else {
+      // Zona de transición suave
+      const t = (gray - 160) / (215 - 160);
+      gray = 120 + t * (255 - 120);
+    }
+
+    const finalVal = Math.round(Math.min(255, Math.max(0, gray)));
+    data[i] = finalVal;
+    data[i + 1] = finalVal;
+    data[i + 2] = finalVal;
+  }
+
+  ctx.putImageData(imgData, 0, 0);
 }
 
 /**
@@ -537,18 +581,16 @@ export function applyGammaCorrection(canvas: HTMLCanvasElement) {
 }
 
 /**
- * RESTAURADOR PRINCIPAL DE DOCUMENTOS
- * Elimina arrugas, sombras de doblado y perforaciones de carpetas en una sola pasada.
+ * RESTAURADOR DE DOCUMENTOS (Sin Arrugas ni Pliegues):
+ * Algoritmo de división de fondo de iluminación (Flat-Field Correction).
+ * Elimina sombras de doblado, pliegues y arrugas de forma fotográfica sin distorsionar ninguna letra ni geometría.
  */
 export function restoreDocument(canvas: HTMLCanvasElement) {
   removeWrinklesAndShadows(canvas);
-  removePunchHoles(canvas);
 }
 
 /**
- * Algoritmo de eliminación de arrugas, pliegues y sombras.
- * Utiliza igualación morfológica de fondo con umbralización adaptativa suave Bradley/Sauvola.
- * Convierte cualquier fondo de papel arrugado/sombreado en blanco puro sin degradar el texto.
+ * Normalización de superficie de fondo para eliminar sombras y arrugas sin artefactos.
  */
 export function removeWrinklesAndShadows(canvas: HTMLCanvasElement) {
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
@@ -559,62 +601,55 @@ export function removeWrinklesAndShadows(canvas: HTMLCanvasElement) {
   const imgData = ctx.getImageData(0, 0, w, h);
   const data = imgData.data;
 
-  // 1. Crear mapa de iluminación creando una versión suavizada de baja frecuencia (Background Surface)
+  // 1. Estimar mapa de iluminación de fondo usando escala reducida y suavizado
   const bgCanvas = document.createElement('canvas');
-  const bgW = Math.max(60, Math.min(150, Math.floor(w / 10))); // Resolución más alta para mejor precisión
-  const bgH = Math.round((bgW * h) / w);
+  const bgW = Math.max(40, Math.min(100, Math.floor(w / 16)));
+  const bgH = Math.max(30, Math.round((bgW * h) / w));
   bgCanvas.width = bgW;
   bgCanvas.height = bgH;
   const bgCtx = bgCanvas.getContext('2d', { willReadFrequently: true });
   if (!bgCtx) return;
 
-  // Dibujar a baja resolución con suavizado
   bgCtx.drawImage(canvas, 0, 0, bgW, bgH);
-  // Aplicar paso de desenfoque adicional en el lienzo pequeñito para eliminar textura local del papel
-  bgCtx.filter = 'blur(2px)';
+
+  // Filtro de desenfoque suave para extraer solo el gradiente de iluminación del papel
+  bgCtx.filter = 'blur(3px)';
   bgCtx.drawImage(bgCanvas, 0, 0);
   bgCtx.filter = 'none';
 
   const bgData = bgCtx.getImageData(0, 0, bgW, bgH).data;
 
-  // 2. Procesamiento Adaptativo Píxel por Píxel (Sauvola & Soft Surface Flattening)
+  // 2. División de iluminación (Flat-field Division): I_final = (I / I_bg) * 240
   for (let y = 0; y < h; y++) {
     const bgY = Math.min(bgH - 1, Math.floor((y / h) * bgH));
     for (let x = 0; x < w; x++) {
       const bgX = Math.min(bgW - 1, Math.floor((x / w) * bgW));
       const bgIdx = (bgY * bgW + bgX) * 4;
 
-      // Color de la luz de fondo estimada en esta región del documento
-      const bgR = bgData[bgIdx] || 200;
-      const bgG = bgData[bgIdx + 1] || 200;
-      const bgB = bgData[bgIdx + 2] || 200;
-      const bgLuminance = 0.299 * bgR + 0.587 * bgG + 0.114 * bgB;
+      const bgR = Math.max(40, bgData[bgIdx] || 180);
+      const bgG = Math.max(40, bgData[bgIdx + 1] || 180);
+      const bgB = Math.max(40, bgData[bgIdx + 2] || 180);
 
       const idx = (y * w + x) * 4;
       const r = data[idx];
       const g = data[idx + 1];
       const b = data[idx + 2];
-      const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
 
-      // Umbral adaptativo: si el píxel está cerca o por encima de la luz del papel local
-      const thresholdOffset = 35; // Aumentado para ser menos agresivo y preservar más detalles
-      const paperThreshold = bgLuminance - thresholdOffset;
+      // Nivelar iluminación respecto al fondo local
+      const newR = Math.min(255, (r / bgR) * 242);
+      const newG = Math.min(255, (g / bgG) * 242);
+      const newB = Math.min(255, (b / bgB) * 242);
 
-      if (luminance >= paperThreshold) {
-        // Es papel/fondo con sombra o arruga -> Aclarar suavemente en lugar de blanco puro
-        const blendFactor = Math.min(1, (luminance - paperThreshold) / 30); // Transición suave
-        data[idx] = Math.floor(r + (255 - r) * blendFactor * 0.8);
-        data[idx + 1] = Math.floor(g + (255 - g) * blendFactor * 0.8);
-        data[idx + 2] = Math.floor(b + (255 - b) * blendFactor * 0.8);
+      // Ligero aumento de contraste en el texto
+      const lum = 0.299 * newR + 0.587 * newG + 0.114 * newB;
+      if (lum > 225) {
+        data[idx] = 255;
+        data[idx + 1] = 255;
+        data[idx + 2] = 255;
       } else {
-        // Es texto/tinta -> Conservar color oscuro con ligero contraste
-        const factor = Math.max(0.7, luminance / paperThreshold);
-        const enhancedVal = Math.floor(factor * 0.95 * 255);
-
-        // Mantener tono original pero con mejor contraste
-        data[idx] = Math.min(r, enhancedVal);
-        data[idx + 1] = Math.min(g, enhancedVal);
-        data[idx + 2] = Math.min(b, enhancedVal);
+        data[idx] = Math.round(newR);
+        data[idx + 1] = Math.round(newG);
+        data[idx + 2] = Math.round(newB);
       }
     }
   }
