@@ -161,16 +161,24 @@ export default function QuickScanView({ onBack, onSavedToEditor }: QuickScanView
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
+    const fileArray: File[] = Array.from(files);
     e.target.value = '';
-    const readFile = (file: File): Promise<string> =>
-      new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = (ev) => resolve(ev.target?.result as string);
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      });
-    const base64List = await Promise.all(Array.from(files).map(readFile));
-    await Promise.all(base64List.map((b64) => addAndProcessImage(b64, scanMode)));
+
+    for (const file of fileArray) {
+      try {
+        const base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (ev) => resolve(ev.target?.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+        if (base64) {
+          await addAndProcessImage(base64, scanMode, true);
+        }
+      } catch (err) {
+        console.error('Error cargando archivo:', err);
+      }
+    }
   };
 
   const retryPage = async (pageId: string) => {
@@ -302,7 +310,7 @@ export default function QuickScanView({ onBack, onSavedToEditor }: QuickScanView
                 style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '12px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 18, color: '#d1d5db', fontWeight: 600, fontSize: 12, cursor: 'pointer' }}
               >
                 <Upload size={15} style={{ color: '#7C5CFC' }} />
-                Cargar desde Galeria / ADF (lote)
+                Cargar desde galería
               </button>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, width: '100%', maxWidth: 280, marginTop: 8 }}>
@@ -446,7 +454,7 @@ export default function QuickScanView({ onBack, onSavedToEditor }: QuickScanView
             </button>
             <button onClick={() => fileInputRef.current?.click()} style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: 12, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 14, fontSize: 12, fontWeight: 600, color: '#e5e7eb', cursor: 'pointer' }}>
               <Upload size={15} />
-              Cargar mas
+              Galería
             </button>
             {doneCount > 0 && (
               <button onClick={handleSendToEditor} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: 12, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 14, fontSize: 12, fontWeight: 600, color: '#d1d5db', cursor: 'pointer' }} title="Enviar al editor completo">
