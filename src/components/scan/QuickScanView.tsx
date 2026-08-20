@@ -100,15 +100,15 @@ export default function QuickScanView({ onBack, onSavedToEditor }: QuickScanView
         setPages((prev) =>
           prev.map((p) =>
             p.id === editingPageId
-              ? { ...p, processedBase64: processedImage, status: 'done' }
+              ? { ...p, originalBase64: processedImage, processedBase64: processedImage, status: 'done' }
               : p
           )
         );
       } else {
-        // Nueva página escaneada
+        // Nueva página escaneada: la imagen recortada es la nueva base permanente
         const newPage: ScannedQuickPage = {
           id: `qpage_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-          originalBase64: pendingCropImage,
+          originalBase64: processedImage,
           processedBase64: processedImage,
           status: 'done',
         };
