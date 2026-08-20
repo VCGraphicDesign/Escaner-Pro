@@ -395,7 +395,10 @@ export function applyGrayscale(canvas: HTMLCanvasElement) {
 }
 
 /**
- * Color mejorado (Aumenta saturación y estira el contraste).
+ * Color Pro Profesional para Documentos:
+ * 1. Balance de blancos adaptativo (White Point Calibration).
+ * 2. Realce de negros para texto nítido y legible.
+ * 3. Saturación selectiva para resaltar sellos, firmas a color y gráficos sin alterar el fondo.
  */
 export function applyColorEnhancement(canvas: HTMLCanvasElement) {
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
@@ -405,26 +408,68 @@ export function applyColorEnhancement(canvas: HTMLCanvasElement) {
   const h = canvas.height;
   const imgData = ctx.getImageData(0, 0, w, h);
   const data = imgData.data;
+  const numPixels = w * h;
 
+  // 1. Calcular histograma de luminancia para encontrar puntos negro y blanco óptimos
+  const hist = new Uint32Array(256);
+  for (let i = 0; i < data.length; i += 4) {
+    const lum = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
+    hist[lum]++;
+  }
+
+  // Encontrar percentil 2% (negros/tinta) y percentil 96% (blanco/papel)
+  const lowCount = Math.floor(numPixels * 0.02);
+  const highCount = Math.floor(numPixels * 0.96);
+
+  let acc = 0;
+  let blackPoint = 15;
+  let whitePoint = 235;
+
+  for (let i = 0; i < 256; i++) {
+    acc += hist[i];
+    if (acc >= lowCount && blackPoint === 15) {
+      blackPoint = Math.max(5, Math.min(60, i));
+    }
+    if (acc >= highCount) {
+      whitePoint = Math.max(180, Math.min(252, i));
+      break;
+    }
+  }
+
+  const range = Math.max(20, whitePoint - blackPoint);
+
+  // 2. Aplicar corrección y realce de color profesional
   for (let i = 0; i < data.length; i += 4) {
     let r = data[i];
     let g = data[i + 1];
     let b = data[i + 2];
 
-    // Estirar el contraste (negros más negros, blancos más blancos)
-    r = (r - 128) * 1.25 + 128;
-    g = (g - 128) * 1.25 + 128;
-    b = (b - 128) * 1.25 + 128;
+    // Mapeo adaptativo por canal
+    r = Math.min(255, Math.max(0, ((r - blackPoint) / range) * 255));
+    g = Math.min(255, Math.max(0, ((g - blackPoint) / range) * 255));
+    b = Math.min(255, Math.max(0, ((b - blackPoint) / range) * 255));
 
-    // Aumentar la saturación de color
-    const gray = 0.299 * r + 0.587 * g + 0.114 * b;
-    r = gray + (r - gray) * 1.35;
-    g = gray + (g - gray) * 1.35;
-    b = gray + (b - gray) * 1.35;
+    // Saturación selectiva para elementos de color (sellos, firmas, logos)
+    const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+    const maxDiff = Math.max(Math.abs(r - lum), Math.abs(g - lum), Math.abs(b - lum));
 
-    data[i] = Math.min(255, Math.max(0, r));
-    data[i + 1] = Math.min(255, Math.max(0, g));
-    data[i + 2] = Math.min(255, Math.max(0, b));
+    if (maxDiff > 12) {
+      // Es un color relevante: aumentar saturación vívida
+      const satBoost = 1.3;
+      r = Math.min(255, Math.max(0, lum + (r - lum) * satBoost));
+      g = Math.min(255, Math.max(0, lum + (g - lum) * satBoost));
+      b = Math.min(255, Math.max(0, lum + (b - lum) * satBoost));
+    } else if (lum > 220) {
+      // Fondo claro de papel: llevarlo a blanco puro suave
+      const paperFade = (lum - 220) / 35;
+      r = Math.min(255, r + (255 - r) * paperFade);
+      g = Math.min(255, g + (255 - g) * paperFade);
+      b = Math.min(255, b + (255 - b) * paperFade);
+    }
+
+    data[i] = Math.round(r);
+    data[i + 1] = Math.round(g);
+    data[i + 2] = Math.round(b);
   }
 
   ctx.putImageData(imgData, 0, 0);

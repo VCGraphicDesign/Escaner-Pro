@@ -15,7 +15,6 @@ import {
   Plus,
   Download,
   Loader2,
-  ScanLine,
   Crop,
   Check,
   X,
@@ -43,12 +42,6 @@ interface QuickScanViewProps {
   onBack: () => void;
   onSavedToEditor: (pages: Array<{ id: string; originalImage: string; processedImage: string }>) => void;
 }
-
-const MODE_OPTIONS: { value: ScanMode; label: string; desc: string }[] = [
-  { value: 'auto', label: 'Auto', desc: 'Iluminación + color' },
-  { value: 'grayscale', label: 'B/N', desc: 'Texto nítido' },
-  { value: 'enhanced', label: 'Color Pro', desc: 'Contraste vívido' },
-];
 
 const DEFAULT_CROP: CropPoints = {
   topLeft: { x: 0.05, y: 0.05 },
@@ -283,31 +276,6 @@ export default function QuickScanView({ onBack, onSavedToEditor }: QuickScanView
           <Download size={13} />
           PDF
         </button>
-      </div>
-
-      {/* SELECTOR DE MODO */}
-      <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '10px 16px', background: '#111118', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-        <ScanLine size={13} style={{ color: '#6b7280', flexShrink: 0 }} />
-        <span style={{ fontSize: 10, color: '#6b7280', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', flexShrink: 0 }}>Modo:</span>
-        <div style={{ display: 'flex', gap: 6, overflowX: 'auto' }}>
-          {MODE_OPTIONS.map((opt) => (
-            <button
-              key={opt.value}
-              onClick={() => setScanMode(opt.value)}
-              style={{
-                flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center',
-                padding: '6px 12px', borderRadius: 12, fontSize: 10, fontWeight: 700, cursor: 'pointer',
-                border: scanMode === opt.value ? '1px solid rgba(124,92,252,0.5)' : '1px solid rgba(255,255,255,0.05)',
-                background: scanMode === opt.value ? 'rgba(124,92,252,0.2)' : 'rgba(255,255,255,0.05)',
-                color: scanMode === opt.value ? '#A388FF' : '#6b7280',
-                transition: 'all 0.15s',
-              }}
-            >
-              <span>{opt.label}</span>
-              <span style={{ fontWeight: 400, fontSize: 9, color: scanMode === opt.value ? 'rgba(163,136,255,0.7)' : '#374151' }}>{opt.desc}</span>
-            </button>
-          ))}
-        </div>
       </div>
 
       {/* AREA PRINCIPAL */}
