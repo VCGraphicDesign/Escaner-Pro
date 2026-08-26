@@ -7,12 +7,12 @@ import React from 'react';
 import { Eye, Zap, Sparkles, Droplet, Moon } from 'lucide-react';
 
 interface FilterCarouselProps {
-  selectedFilter: 'original' | 'auto' | 'grayscale' | 'enhanced' | 'restore';
-  onChange: (filter: 'original' | 'auto' | 'grayscale' | 'enhanced' | 'restore') => void;
+  selectedFilter: 'original' | 'auto' | 'grayscale' | 'restore';
+  onChange: (filter: 'original' | 'auto' | 'grayscale' | 'restore') => void;
 }
 
 interface FilterItem {
-  id: 'original' | 'auto' | 'grayscale' | 'enhanced' | 'restore';
+  id: 'original' | 'auto' | 'grayscale' | 'restore';
   name: string;
   description: string;
   icon: React.ReactNode;
@@ -43,12 +43,6 @@ export default function FilterCarousel({ selectedFilter, onChange }: FilterCarou
       name: 'Gris Papel',
       description: 'Escala de grises',
       icon: <Zap size={18} />,
-    },
-    {
-      id: 'enhanced',
-      name: 'Color Pro',
-      description: 'Mejora vibrante',
-      icon: <Droplet size={18} />,
     },
   ];
 

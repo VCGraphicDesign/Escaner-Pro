@@ -31,7 +31,7 @@ export interface PageAdjustment {
   brightness: number; // 50 to 150 (percentage, default 100)
   contrast: number; // 50 to 150 (percentage, default 100)
   sharpness: number; // 0 to 100 (default 0)
-  filter: 'original' | 'auto' | 'grayscale' | 'enhanced';
+  filter: 'original' | 'auto' | 'grayscale';
   rotation: number; // 0, 90, 180, 270 degrees
   crop: CropPoints | null;
   annotations: Annotation[];

@@ -31,7 +31,7 @@ import {
 import { DocumentItem, ScannedPage, Annotation, ImageOverlay } from '../types';
 import { saveDocument } from '../services/documentStore';
 import { generatePDF } from '../services/pdfGenerator';
-import { loadImage, processPageImage } from '../services/imageProcessor';
+import { loadImage, processPageImage, restoreDocument } from '../services/imageProcessor';
 import SaveBottomSheet from '../components/save/SaveBottomSheet';
 
 interface EditPageProps {
@@ -49,6 +49,12 @@ export default function EditPage({ document: initialDoc, onBack, onNavigateToCle
   const [showSaveSheet, setShowSaveSheet] = useState(false);
   const [isRotating, setIsRotating] = useState(false);
   const [isApplyingFilter, setIsApplyingFilter] = useState(false);
+  
+  // Estado para modo de dibujo de máscara (filtro sin arrugas)
+  const [isMaskDrawingMode, setIsMaskDrawingMode] = useState(false);
+  const [maskCanvas, setMaskCanvas] = useState<HTMLCanvasElement | null>(null);
+  const [isDrawing, setIsDrawing] = useState(false);
+  const maskCanvasRef = useRef<HTMLCanvasElement>(null);
 
   // Estados de Anotación de Texto
   const [textToInput, setTextToInput] = useState('');
@@ -158,7 +164,7 @@ export default function EditPage({ document: initialDoc, onBack, onNavigateToCle
   // ----------------------------------------------------
   // CAMBIAR FILTRO PROFESIONAL EN TIEMPO REAL
   // ----------------------------------------------------
-  const handleChangeFilter = async (filterType: 'original' | 'auto' | 'grayscale' | 'enhanced' | 'restore') => {
+  const handleChangeFilter = async (filterType: 'original' | 'auto' | 'grayscale' | 'restore') => {
     if (!currentPage || isApplyingFilter) return;
     setIsApplyingFilter(true);
 
@@ -184,6 +190,128 @@ export default function EditPage({ document: initialDoc, onBack, onNavigateToCle
     } finally {
       setIsApplyingFilter(false);
     }
+  };
+
+  // ----------------------------------------------------
+  // MODO DE DIBUJO DE MÁSCARA (Filtro Sin Arrugas)
+  // ----------------------------------------------------
+  const handleStartMaskDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!maskCanvasRef.current) return;
+    const canvas = maskCanvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 20;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    setIsDrawing(true);
+  };
+
+  const handleDrawMask = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!isDrawing || !maskCanvasRef.current) return;
+    const canvas = maskCanvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    
+    ctx.lineTo(x, y);
+    ctx.stroke();
+  };
+
+  const handleStopMaskDrawing = () => {
+    if (!maskCanvasRef.current) return;
+    const ctx = maskCanvasRef.current.getContext('2d');
+    if (!ctx) return;
+    
+    ctx.closePath();
+    setIsDrawing(false);
+  };
+
+  const handleClearMask = () => {
+    if (!maskCanvasRef.current) return;
+    const ctx = maskCanvasRef.current.getContext('2d');
+    if (!ctx) return;
+    
+    ctx.clearRect(0, 0, maskCanvasRef.current.width, maskCanvasRef.current.height);
+  };
+
+  const handleApplyInpainting = async () => {
+    if (!currentPage || !maskCanvasRef.current) return;
+    
+    setIsApplyingFilter(true);
+    try {
+      const img = await loadImage(currentPage.originalImage);
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      
+      ctx.drawImage(img, 0, 0);
+      
+      // Aplicar inpainting con la máscara
+      await restoreDocument(canvas, maskCanvasRef.current);
+      
+      const newProcessed = canvas.toDataURL('image/jpeg', 0.98);
+      
+      const nextPages = [...doc.pages];
+      nextPages[currentIndex] = {
+        ...currentPage,
+        processedImage: newProcessed,
+      };
+      
+      const nextDoc = { ...doc, pages: nextPages };
+      pushState(nextDoc);
+      
+      // Salir del modo de dibujo
+      setIsMaskDrawingMode(false);
+      handleClearMask();
+    } catch (err) {
+      console.error('Error aplicando inpainting:', err);
+    } finally {
+      setIsApplyingFilter(false);
+    }
+  };
+
+  // Inicializar canvas de máscara cuando se activa el modo
+  useEffect(() => {
+    if (isMaskDrawingMode && currentPage && maskCanvasRef.current) {
+      const canvas = maskCanvasRef.current;
+      const img = new Image();
+      img.onload = () => {
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.fillStyle = '#000000';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+        setMaskCanvas(canvas);
+      };
+      img.src = currentPage.originalImage;
+    }
+  }, [isMaskDrawingMode, currentPage]);
+
+  // Modificar handleChangeFilter para activar modo de dibujo con restore
+  const handleChangeFilterWithMask = async (filterType: 'original' | 'auto' | 'grayscale' | 'restore') => {
+    if (filterType === 'restore') {
+      setIsMaskDrawingMode(true);
+      setActiveTab('filter');
+      return;
+    }
+    
+    setIsMaskDrawingMode(false);
+    await handleChangeFilter(filterType);
   };
 
   // ----------------------------------------------------
@@ -621,6 +749,52 @@ export default function EditPage({ document: initialDoc, onBack, onNavigateToCle
                 referrerPolicy="no-referrer"
               />
 
+              {/* Canvas de máscara para modo de dibujo (filtro sin arrugas) */}
+              {isMaskDrawingMode && (
+                <>
+                  <canvas
+                    ref={maskCanvasRef}
+                    onMouseDown={handleStartMaskDrawing}
+                    onMouseMove={handleDrawMask}
+                    onMouseUp={handleStopMaskDrawing}
+                    onMouseLeave={handleStopMaskDrawing}
+                    className="absolute top-0 left-0 w-full h-full cursor-crosshair z-30"
+                    style={{ touchAction: 'none' }}
+                  />
+                  
+                  {/* Controles de máscara */}
+                  <div className="absolute top-2 right-2 flex gap-2 z-40">
+                    <button
+                      onClick={handleClearMask}
+                      className="p-2 bg-red-500/80 text-white rounded-lg hover:bg-red-600 transition-colors text-xs font-bold"
+                    >
+                      Limpiar
+                    </button>
+                    <button
+                      onClick={handleApplyInpainting}
+                      disabled={isApplyingFilter}
+                      className="p-2 bg-[#2979FF]/80 text-white rounded-lg hover:bg-[#2979FF] transition-colors text-xs font-bold disabled:opacity-50"
+                    >
+                      {isApplyingFilter ? 'Aplicando...' : 'Aplicar'}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setIsMaskDrawingMode(false);
+                        handleClearMask();
+                      }}
+                      className="p-2 bg-gray-600/80 text-white rounded-lg hover:bg-gray-700 transition-colors text-xs font-bold"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                  
+                  {/* Instrucciones */}
+                  <div className="absolute bottom-2 left-1/2 transform -translate-x-1/2 bg-black/70 text-white px-4 py-2 rounded-lg text-xs z-40">
+                    Dibuja sobre las líneas de pliegue para eliminarlas
+                  </div>
+                </>
+              )}
+
               {/* 1. Capa de Firmas / Imágenes Superpuestas (Arrastrables 1:1 y Redimensionables) */}
               {(currentPage.adjustments.overlays || []).map((ov) => (
                 <div
@@ -909,12 +1083,6 @@ export default function EditPage({ document: initialDoc, onBack, onNavigateToCle
                   desc: 'Texto nítido',
                   icon: <Sliders size={16} />,
                 },
-                {
-                  id: 'enhanced' as const,
-                  name: 'Color Pro',
-                  desc: 'Vívido y brillo',
-                  icon: <Droplet size={16} />,
-                },
               ].map((f) => {
                 const isActive = (currentPage?.adjustments.filter || 'original') === f.id;
                 return (
@@ -922,7 +1090,7 @@ export default function EditPage({ document: initialDoc, onBack, onNavigateToCle
                     key={f.id}
                     id={`filter-btn-${f.id}`}
                     disabled={isApplyingFilter}
-                    onClick={() => handleChangeFilter(f.id)}
+                    onClick={() => handleChangeFilterWithMask(f.id)}
                     className={`flex flex-col items-center justify-center p-2 rounded-xl border transition-all text-center cursor-pointer ${
                       isActive
                         ? 'bg-[#2979FF]/20 border-[#2979FF] text-[#2979FF] shadow-md shadow-[#2979FF]/20 scale-105'

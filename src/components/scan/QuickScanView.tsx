@@ -28,7 +28,7 @@ import { CropPoints } from '../../types';
 import LiveCameraModal from './LiveCameraModal';
 import CropTool from '../clean/CropTool';
 
-type ScanMode = 'auto' | 'grayscale' | 'enhanced';
+type ScanMode = 'auto' | 'grayscale';
 type PageStatus = 'pending' | 'processing' | 'done' | 'error';
 
 interface ScannedQuickPage {

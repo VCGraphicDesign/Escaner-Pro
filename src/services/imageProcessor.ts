@@ -24,6 +24,221 @@ export function loadImage(src: string): Promise<HTMLImageElement> {
 }
 
 /**
+ * White Balance automático usando White Patch Algorithm (99th percentile).
+ * Corrige tonos anaranjados/amarillentos causados por iluminación cálida.
+ */
+function applyWhiteBalance(canvas: HTMLCanvasElement) {
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return;
+
+  const w = canvas.width;
+  const h = canvas.height;
+  const imgData = ctx.getImageData(0, 0, w, h);
+  const data = imgData.data;
+
+  // 1. Calcular histogramas separados para R, G, B
+  const histR = new Uint32Array(256);
+  const histG = new Uint32Array(256);
+  const histB = new Uint32Array(256);
+
+  for (let i = 0; i < data.length; i += 4) {
+    histR[data[i]]++;
+    histG[data[i + 1]]++;
+    histB[data[i + 2]]++;
+  }
+
+  // 2. Encontrar el percentil 99 (white point) de cada canal
+  const totalPixels = w * h;
+  const targetCount = Math.floor(totalPixels * 0.99);
+
+  let accR = 0, accG = 0, accB = 0;
+  let whitePointR = 255, whitePointG = 255, whitePointB = 255;
+
+  for (let i = 0; i < 256; i++) {
+    accR += histR[i];
+    if (whitePointR === 255 && accR >= targetCount) {
+      whitePointR = Math.max(50, i);
+    }
+
+    accG += histG[i];
+    if (whitePointG === 255 && accG >= targetCount) {
+      whitePointG = Math.max(50, i);
+    }
+
+    accB += histB[i];
+    if (whitePointB === 255 && accB >= targetCount) {
+      whitePointB = Math.max(50, i);
+    }
+  }
+
+  // 3. Calcular factores de escala
+  const scaleR = 255 / whitePointR;
+  const scaleG = 255 / whitePointG;
+  const scaleB = 255 / whitePointB;
+
+  // 4. Aplicar corrección a cada píxel
+  for (let i = 0; i < data.length; i += 4) {
+    data[i] = Math.min(255, data[i] * scaleR);
+    data[i + 1] = Math.min(255, data[i + 1] * scaleG);
+    data[i + 2] = Math.min(255, data[i + 2] * scaleB);
+  }
+
+  ctx.putImageData(imgData, 0, 0);
+}
+
+/**
+ * CLAHE (Contrast-Limited Adaptive Histogram Equalization) para mejora de contraste local.
+ * Divide la imagen en tiles, aplica histogram equalization con clipping para evitar amplificar ruido.
+ * Usa interpolación bilineal entre tiles para evitar bordes artificiales.
+ */
+function applyCLAHE(canvas: HTMLCanvasElement) {
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return;
+
+  const w = canvas.width;
+  const h = canvas.height;
+  const imgData = ctx.getImageData(0, 0, w, h);
+  const data = imgData.data;
+
+  // Parámetros CLAHE estándar para documentos
+  const tileGridX = 8;
+  const tileGridY = 8;
+  const clipLimit = 2.0;
+  const bins = 256;
+
+  const tileW = Math.ceil(w / tileGridX);
+  const tileH = Math.ceil(h / tileGridY);
+
+  // Convertir a escala de grises para CLAHE (mejor para documentos)
+  const gray = new Uint8Array(w * h);
+  for (let i = 0; i < data.length; i += 4) {
+    gray[i / 4] = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
+  }
+
+  // Construir LUTs para cada tile
+  const luts: Uint8Array[][] = [];
+
+  for (let ty = 0; ty < tileGridY; ty++) {
+    luts[ty] = [];
+    for (let tx = 0; tx < tileGridX; tx++) {
+      const lut = buildTileLUT(gray, w, h, tx, ty, tileW, tileH, clipLimit, bins);
+      luts[ty][tx] = lut;
+    }
+  }
+
+  // Aplicar CLAHE con interpolación bilineal
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      // Encontrar posición relativa en el grid de tiles
+      const gx = (x / w) * (tileGridX - 1);
+      const gy = (y / h) * (tileGridY - 1);
+
+      const tx = Math.floor(gx);
+      const ty = Math.floor(gy);
+      const fx = gx - tx;
+      const fy = gy - ty;
+
+      // Obtener valores de los 4 tiles vecinos
+      const tx1 = Math.min(tx + 1, tileGridX - 1);
+      const ty1 = Math.min(ty + 1, tileGridY - 1);
+
+      const vTL = luts[ty][tx][gray[y * w + x]];
+      const vTR = luts[ty][tx1][gray[y * w + x]];
+      const vBL = luts[ty1][tx][gray[y * w + x]];
+      const vBR = luts[ty1][tx1][gray[y * w + x]];
+
+      // Interpolación bilineal
+      const vTop = vTL * (1 - fx) + vTR * fx;
+      const vBottom = vBL * (1 - fx) + vBR * fx;
+      const finalValue = vTop * (1 - fy) + vBottom * fy;
+
+      // Aplicar a los canales RGB manteniendo proporciones de color
+      const idx = (y * w + x) * 4;
+      const factor = finalValue / (gray[y * w + x] || 1);
+      data[idx] = Math.min(255, Math.max(0, data[idx] * factor));
+      data[idx + 1] = Math.min(255, Math.max(0, data[idx + 1] * factor));
+      data[idx + 2] = Math.min(255, Math.max(0, data[idx + 2] * factor));
+    }
+  }
+
+  ctx.putImageData(imgData, 0, 0);
+}
+
+/**
+ * Construye LUT (lookup table) para un tile específico de CLAHE.
+ */
+function buildTileLUT(
+  gray: Uint8Array,
+  w: number,
+  h: number,
+  tx: number,
+  ty: number,
+  tileW: number,
+  tileH: number,
+  clipLimit: number,
+  bins: number
+): Uint8Array {
+  // Calcular límites del tile
+  const startX = Math.floor(tx * tileW);
+  const startY = Math.floor(ty * tileH);
+  const endX = Math.min(startX + tileW, w);
+  const endY = Math.min(startY + tileH, h);
+
+  const tilePixels = (endX - startX) * (endY - startY);
+
+  // Construir histograma
+  const hist = new Uint32Array(bins);
+  for (let y = startY; y < endY; y++) {
+    for (let x = startX; x < endX; x++) {
+      hist[gray[y * w + x]]++;
+    }
+  }
+
+  // Clipping del histograma
+  const clipLimitActual = Math.max(1, Math.floor(clipLimit * tilePixels / bins));
+  let clipped = 0;
+
+  for (let i = 0; i < bins; i++) {
+    if (hist[i] > clipLimitActual) {
+      clipped += hist[i] - clipLimitActual;
+      hist[i] = clipLimitActual;
+    }
+  }
+
+  // Redistribuir exceso uniformemente
+  const redist = Math.floor(clipped / bins);
+  const residual = clipped - redist * bins;
+
+  for (let i = 0; i < bins; i++) {
+    hist[i] += redist;
+  }
+
+  for (let i = 0; i < residual; i++) {
+    hist[i]++;
+  }
+
+  // Construir CDF y LUT
+  const lut = new Uint8Array(bins);
+  let sum = 0;
+  const cdf = new Uint32Array(bins);
+
+  for (let i = 0; i < bins; i++) {
+    sum += hist[i];
+    cdf[i] = sum;
+  }
+
+  const cdfMin = cdf[0];
+  const cdfMax = cdf[bins - 1];
+  const range = cdfMax - cdfMin || 1;
+
+  for (let i = 0; i < bins; i++) {
+    lut[i] = Math.round(((cdf[i] - cdfMin) / range) * (bins - 1));
+  }
+
+  return lut;
+}
+
+/**
  * Aplica ajustes de Brillo, Contraste, Rotación, Filtros, Recorte y Nitidez.
  */
 export async function processPageImage(
@@ -32,7 +247,7 @@ export async function processPageImage(
     brightness: number;
     contrast: number;
     sharpness: number;
-    filter: 'original' | 'auto' | 'grayscale' | 'enhanced' | 'gamma' | 'restore';
+    filter: 'original' | 'auto' | 'grayscale' | 'gamma' | 'restore';
     rotation: number;
     crop: CropPoints | null;
   }
@@ -99,17 +314,19 @@ export async function processPageImage(
   ctx.putImageData(imgData, 0, 0);
 
   // 4. Aplicar Filtros Avanzados
-  if (adjustments.filter === 'grayscale') {
-    applyGrayscale(canvas);
-  } else if (adjustments.filter === 'enhanced') {
-    applyColorEnhancement(canvas);
+  if (adjustments.filter === 'original') {
+    applyWhiteBalance(canvas);
+  } else if (adjustments.filter === 'grayscale') {
+    normalizeIllumination(canvas);
+    applySauvolaBinarization(canvas);
   } else if (adjustments.filter === 'auto') {
     normalizeIllumination(canvas);
+    applyCLAHE(canvas);
     applyColorEnhancement(canvas);
   } else if (adjustments.filter === 'gamma') {
     applyGammaCorrection(canvas);
   } else if (adjustments.filter === 'restore') {
-    restoreDocument(canvas);
+    await restoreDocument(canvas);
   }
 
   // 5. Aplicar Nitidez (Sharpness) si es mayor a cero
@@ -373,6 +590,97 @@ export function applyAdaptiveThreshold(canvas: HTMLCanvasElement) {
 }
 
 /**
+ * Sauvola Binarization - El estándar de la industria para documentos.
+ * Usa integral images para rendimiento O(N) y maneja iluminación no uniforme.
+ * Fórmula: t = m * (1 - k * (1 - s/128))
+ */
+function applySauvolaBinarization(canvas: HTMLCanvasElement) {
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return;
+
+  const w = canvas.width;
+  const h = canvas.height;
+  const imgData = ctx.getImageData(0, 0, w, h);
+  const data = imgData.data;
+
+  // Parámetros Sauvola estándar para documentos
+  const k = 0.34;
+  const windowSize = 15;
+  const R = 128;
+  const halfWindow = Math.floor(windowSize / 2);
+
+  // Convertir a escala de grises
+  const gray = new Uint8Array(w * h);
+  for (let i = 0; i < data.length; i += 4) {
+    gray[i / 4] = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
+  }
+
+  // Calcular integral images para media y media cuadrada
+  const integral = new Uint32Array((w + 1) * (h + 1));
+  const integralSq = new Float32Array((w + 1) * (h + 1));
+
+  for (let y = 1; y <= h; y++) {
+    for (let x = 1; x <= w; x++) {
+      const idx = (y - 1) * w + (x - 1);
+      const val = gray[idx];
+      const valSq = val * val;
+
+      integral[y * (w + 1) + x] =
+        val +
+        integral[(y - 1) * (w + 1) + x] +
+        integral[y * (w + 1) + (x - 1)] -
+        integral[(y - 1) * (w + 1) + (x - 1)];
+
+      integralSq[y * (w + 1) + x] =
+        valSq +
+        integralSq[(y - 1) * (w + 1) + x] +
+        integralSq[y * (w + 1) + (x - 1)] -
+        integralSq[(y - 1) * (w + 1) + (x - 1)];
+    }
+  }
+
+  // Función auxiliar para obtener suma de ventana desde integral image
+  const getWindowSum = (x1: number, y1: number, x2: number, y2: number, integralArr: Uint32Array | Float32Array): number => {
+    const A = integralArr[y1 * (w + 1) + x1];
+    const B = integralArr[y1 * (w + 1) + x2];
+    const C = integralArr[y2 * (w + 1) + x1];
+    const D = integralArr[y2 * (w + 1) + x2];
+    return D - B - C + A;
+  };
+
+  // Aplicar Sauvola binarización
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const x1 = Math.max(0, x - halfWindow);
+      const y1 = Math.max(0, y - halfWindow);
+      const x2 = Math.min(w, x + halfWindow);
+      const y2 = Math.min(h, y + halfWindow);
+
+      const area = (x2 - x1) * (y2 - y1);
+      const sum = getWindowSum(x1, y1, x2, y2, integral);
+      const sumSq = getWindowSum(x1, y1, x2, y2, integralSq);
+
+      const mean = sum / area;
+      const variance = (sumSq / area) - (mean * mean);
+      const stdDev = Math.sqrt(Math.max(0, variance));
+
+      // Fórmula Sauvola
+      const threshold = mean * (1 - k * (1 - stdDev / R));
+
+      const idx = (y * w + x) * 4;
+      const pixelValue = gray[y * w + x];
+      const binary = pixelValue > threshold ? 255 : 0;
+
+      data[idx] = binary;
+      data[idx + 1] = binary;
+      data[idx + 2] = binary;
+    }
+  }
+
+  ctx.putImageData(imgData, 0, 0);
+}
+
+/**
  * Blanco y Negro / Escala de Grises Documental para Impresión:
  * Convierte cualquier texto (rojo, azul, negro, verde) en trazos oscuros y nítidos
  * sobre un fondo de papel blanco limpio, ideal para imprimir con tinta negra sin distorsiones ni inversiones.
@@ -582,11 +890,17 @@ export function applyGammaCorrection(canvas: HTMLCanvasElement) {
 
 /**
  * RESTAURADOR DE DOCUMENTOS (Sin Arrugas ni Pliegues):
- * Algoritmo de división de fondo de iluminación (Flat-Field Correction).
- * Elimina sombras de doblado, pliegues y arrugas de forma fotográfica sin distorsionar ninguna letra ni geometría.
+ * Usa OpenCV.js inpainting para eliminar líneas de doblado físicas.
+ * Requiere máscara manual del usuario indicando áreas de pliegue.
  */
-export function restoreDocument(canvas: HTMLCanvasElement) {
-  removeWrinklesAndShadows(canvas);
+export async function restoreDocument(canvas: HTMLCanvasElement, maskCanvas?: HTMLCanvasElement) {
+  // Si no hay máscara, usar flat-field correction como fallback
+  if (!maskCanvas) {
+    removeWrinklesAndShadows(canvas);
+    return;
+  }
+  
+  await removeWrinklesWithInpainting(canvas, maskCanvas);
 }
 
 /**
@@ -655,6 +969,108 @@ export function removeWrinklesAndShadows(canvas: HTMLCanvasElement) {
   }
 
   ctx.putImageData(imgData, 0, 0);
+}
+
+/**
+ * Inpainting con OpenCV.js para eliminar líneas de doblado físicas.
+ * Carga OpenCV.js desde CDN y aplica cv.inpaint() en áreas marcadas.
+ */
+async function removeWrinklesWithInpainting(canvas: HTMLCanvasElement, maskCanvas: HTMLCanvasElement) {
+  // Cargar OpenCV.js si no está disponible
+  if (typeof (window as any).cv === 'undefined') {
+    await loadOpenCV();
+  }
+  
+  const cv = (window as any).cv;
+  if (!cv) {
+    console.error('OpenCV.js no pudo cargarse');
+    removeWrinklesAndShadows(canvas);
+    return;
+  }
+
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return;
+
+  const w = canvas.width;
+  const h = canvas.height;
+
+  try {
+    // Leer imagen original
+    const src = cv.imread(canvas);
+    const imgRGB = new cv.Mat();
+    cv.cvtColor(src, imgRGB, cv.COLOR_RGBA2RGB);
+
+    // Leer máscara
+    const mask = cv.imread(maskCanvas);
+    const maskGray = new cv.Mat();
+    cv.cvtColor(mask, maskGray, cv.COLOR_RGBA2GRAY);
+
+    // Aplicar threshold para asegurar máscara binaria
+    const maskBinary = new cv.Mat();
+    cv.threshold(maskGray, maskBinary, 127, 255, cv.THRESH_BINARY);
+
+    // Dilatar máscara para cubrir área completa del pliegue
+    const kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(5, 5));
+    const maskDilated = new cv.Mat();
+    cv.dilate(maskBinary, maskDilated, kernel);
+
+    // Aplicar inpainting
+    const dst = new cv.Mat();
+    cv.inpaint(imgRGB, maskDilated, dst, 3, cv.INPAINT_TELEA);
+
+    // Convertir resultado de vuelta a RGBA
+    const dstRGBA = new cv.Mat();
+    cv.cvtColor(dst, dstRGBA, cv.COLOR_RGB2RGBA);
+
+    // Mostrar resultado en canvas
+    cv.imshow(canvas, dstRGBA);
+
+    // Limpiar memoria
+    src.delete();
+    imgRGB.delete();
+    mask.delete();
+    maskGray.delete();
+    maskBinary.delete();
+    kernel.delete();
+    maskDilated.delete();
+    dst.delete();
+    dstRGBA.delete();
+  } catch (error) {
+    console.error('Error en inpainting:', error);
+    // Fallback a flat-field correction
+    removeWrinklesAndShadows(canvas);
+  }
+}
+
+/**
+ * Carga OpenCV.js desde CDN
+ */
+function loadOpenCV(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (typeof (window as any).cv !== 'undefined') {
+      resolve();
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.src = 'https://docs.opencv.org/4.x/opencv.js';
+    script.async = true;
+    
+    script.onload = () => {
+      // Esperar a que OpenCV esté completamente inicializado
+      const checkCV = () => {
+        if (typeof (window as any).cv !== 'undefined' && (window as any).cv.Mat) {
+          resolve();
+        } else {
+          setTimeout(checkCV, 100);
+        }
+      };
+      checkCV();
+    };
+    
+    script.onerror = () => reject(new Error('Error cargando OpenCV.js'));
+    document.head.appendChild(script);
+  });
 }
 
 /**
@@ -1025,7 +1441,7 @@ export async function detectDocumentCorners(originalBase64: string): Promise<Cro
  */
 export async function autoProcessForScan(
   base64: string,
-  mode: 'auto' | 'grayscale' | 'enhanced' = 'auto'
+  mode: 'auto' | 'grayscale' = 'auto'
 ): Promise<{
   processedImage: string;
   cropPoints: CropPoints;
