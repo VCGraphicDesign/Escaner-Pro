@@ -315,13 +315,12 @@ export async function processPageImage(
 
   // 4. Aplicar Filtros Avanzados
   if (adjustments.filter === 'original') {
-    applyWhiteBalance(canvas);
+    normalizeIllumination(canvas);
   } else if (adjustments.filter === 'grayscale') {
     normalizeIllumination(canvas);
-    applySauvolaBinarization(canvas);
+    applyAdaptiveThreshold(canvas);
   } else if (adjustments.filter === 'auto') {
     normalizeIllumination(canvas);
-    applyCLAHE(canvas);
     applyColorEnhancement(canvas);
   } else if (adjustments.filter === 'gamma') {
     applyGammaCorrection(canvas);
