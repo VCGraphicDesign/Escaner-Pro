@@ -893,9 +893,9 @@ export function applyGammaCorrection(canvas: HTMLCanvasElement) {
  * Requiere máscara manual del usuario indicando áreas de pliegue.
  */
 export async function restoreDocument(canvas: HTMLCanvasElement, maskCanvas?: HTMLCanvasElement) {
-  // Si no hay máscara, usar flat-field correction como fallback
+  // Si no hay máscara, usar normalización de iluminación como fallback
   if (!maskCanvas) {
-    removeWrinklesAndShadows(canvas);
+    normalizeIllumination(canvas);
     return;
   }
   
