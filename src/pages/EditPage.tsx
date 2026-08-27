@@ -55,6 +55,7 @@ export default function EditPage({ document: initialDoc, onBack, onNavigateToCle
   const [maskCanvas, setMaskCanvas] = useState<HTMLCanvasElement | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const maskCanvasRef = useRef<HTMLCanvasElement>(null);
+  const previewImgRef = useRef<HTMLImageElement>(null);
 
   // Estados de Anotación de Texto
   const [textToInput, setTextToInput] = useState('');
@@ -229,35 +230,47 @@ export default function EditPage({ document: initialDoc, onBack, onNavigateToCle
   // ----------------------------------------------------
   // MODO DE DIBUJO DE MÁSCARA (Filtro Sin Arrugas)
   // ----------------------------------------------------
-  const handleStartMaskDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!maskCanvasRef.current) return;
+  const getCoordinatesFromEvent = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+    if (!maskCanvasRef.current) return null;
     const canvas = maskCanvasRef.current;
     const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    
+    const clientX = 'touches' in e && e.touches.length > 0 ? e.touches[0].clientX : 'clientX' in e ? e.clientX : 0;
+    const clientY = 'touches' in e && e.touches.length > 0 ? e.touches[0].clientY : 'clientY' in e ? e.clientY : 0;
+
+    const scaleX = canvas.width / (rect.width || 1);
+    const scaleY = canvas.height / (rect.height || 1);
+    const x = Math.max(0, Math.min(canvas.width, (clientX - rect.left) * scaleX));
+    const y = Math.max(0, Math.min(canvas.height, (clientY - rect.top) * scaleY));
+    return { x, y, canvas };
+  };
+
+  const handleStartMaskDrawing = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+    const coords = getCoordinatesFromEvent(e);
+    if (!coords) return;
+    const { x, y, canvas } = coords;
+
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    
+
     ctx.beginPath();
     ctx.moveTo(x, y);
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 20;
+    // Trazo visual rojo semitransparente para ver el documento debajo
+    ctx.strokeStyle = 'rgba(239, 68, 68, 0.65)';
+    ctx.lineWidth = Math.max(16, Math.round(canvas.width * 0.025));
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     setIsDrawing(true);
   };
 
-  const handleDrawMask = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!isDrawing || !maskCanvasRef.current) return;
-    const canvas = maskCanvasRef.current;
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    
+  const handleDrawMask = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+    if (!isDrawing) return;
+    const coords = getCoordinatesFromEvent(e);
+    if (!coords) return;
+    const { x, y, canvas } = coords;
+
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    
+
     ctx.lineTo(x, y);
     ctx.stroke();
   };
@@ -266,7 +279,7 @@ export default function EditPage({ document: initialDoc, onBack, onNavigateToCle
     if (!maskCanvasRef.current) return;
     const ctx = maskCanvasRef.current.getContext('2d');
     if (!ctx) return;
-    
+
     ctx.closePath();
     setIsDrawing(false);
   };
@@ -275,13 +288,13 @@ export default function EditPage({ document: initialDoc, onBack, onNavigateToCle
     if (!maskCanvasRef.current) return;
     const ctx = maskCanvasRef.current.getContext('2d');
     if (!ctx) return;
-    
+
     ctx.clearRect(0, 0, maskCanvasRef.current.width, maskCanvasRef.current.height);
   };
 
   const handleApplyInpainting = async () => {
     if (!currentPage || !maskCanvasRef.current) return;
-    
+
     setIsApplyingFilter(true);
     try {
       const img = await loadImage(currentPage.originalImage);
@@ -290,23 +303,49 @@ export default function EditPage({ document: initialDoc, onBack, onNavigateToCle
       canvas.height = img.naturalHeight;
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
-      
+
       ctx.drawImage(img, 0, 0);
-      
-      // Aplicar inpainting con la máscara
-      await restoreDocument(canvas, maskCanvasRef.current);
-      
+
+      // Crear máscara binaria interna (fondo negro #000000, trazos en blanco #ffffff) para OpenCV
+      const binaryMaskCanvas = document.createElement('canvas');
+      binaryMaskCanvas.width = canvas.width;
+      binaryMaskCanvas.height = canvas.height;
+      const bCtx = binaryMaskCanvas.getContext('2d');
+      if (!bCtx) return;
+
+      bCtx.fillStyle = '#000000';
+      bCtx.fillRect(0, 0, binaryMaskCanvas.width, binaryMaskCanvas.height);
+
+      const visibleCtx = maskCanvasRef.current.getContext('2d');
+      if (visibleCtx) {
+        const visibleData = visibleCtx.getImageData(0, 0, maskCanvasRef.current.width, maskCanvasRef.current.height);
+        const binaryData = bCtx.getImageData(0, 0, binaryMaskCanvas.width, binaryMaskCanvas.height);
+        for (let i = 0; i < visibleData.data.length; i += 4) {
+          const alpha = visibleData.data[i + 3];
+          if (alpha > 20) {
+            binaryData.data[i] = 255;
+            binaryData.data[i + 1] = 255;
+            binaryData.data[i + 2] = 255;
+            binaryData.data[i + 3] = 255;
+          }
+        }
+        bCtx.putImageData(binaryData, 0, 0);
+      }
+
+      // Aplicar inpainting con la máscara binaria
+      await restoreDocument(canvas, binaryMaskCanvas);
+
       const newProcessed = canvas.toDataURL('image/jpeg', 0.98);
-      
+
       const nextPages = [...doc.pages];
       nextPages[currentIndex] = {
         ...currentPage,
         processedImage: newProcessed,
       };
-      
+
       const nextDoc = { ...doc, pages: nextPages };
       pushState(nextDoc);
-      
+
       // Salir del modo de dibujo
       setIsMaskDrawingMode(false);
       handleClearMask();
@@ -317,7 +356,7 @@ export default function EditPage({ document: initialDoc, onBack, onNavigateToCle
     }
   };
 
-  // Inicializar canvas de máscara cuando se activa el modo
+  // Inicializar canvas de máscara transparente cuando se activa el modo
   useEffect(() => {
     if (isMaskDrawingMode && currentPage && maskCanvasRef.current) {
       const canvas = maskCanvasRef.current;
@@ -327,8 +366,7 @@ export default function EditPage({ document: initialDoc, onBack, onNavigateToCle
         canvas.height = img.naturalHeight;
         const ctx = canvas.getContext('2d');
         if (ctx) {
-          ctx.fillStyle = '#000000';
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
         }
         setMaskCanvas(canvas);
       };
@@ -336,14 +374,27 @@ export default function EditPage({ document: initialDoc, onBack, onNavigateToCle
     }
   }, [isMaskDrawingMode, currentPage]);
 
-  // Modificar handleChangeFilter para activar modo de dibujo con restore
+  // Modificar handleChangeFilter para activar modo de dibujo con restore y actualizar estado de filtro
   const handleChangeFilterWithMask = async (filterType: 'original' | 'auto' | 'grayscale' | 'restore') => {
     if (filterType === 'restore') {
+      if (currentPage) {
+        const updatedAdjustments = {
+          ...currentPage.adjustments,
+          filter: 'restore' as const,
+        };
+        const nextPages = [...doc.pages];
+        nextPages[currentIndex] = {
+          ...currentPage,
+          adjustments: updatedAdjustments,
+        };
+        const nextDoc = { ...doc, pages: nextPages };
+        pushState(nextDoc);
+      }
       setIsMaskDrawingMode(true);
       setActiveTab('filter');
       return;
     }
-    
+
     setIsMaskDrawingMode(false);
     await handleChangeFilter(filterType);
   };
@@ -743,11 +794,11 @@ export default function EditPage({ document: initialDoc, onBack, onNavigateToCle
       </header>
 
       {/* Área Central: Visualizador de Página con Anotaciones y Firmas Interactivas */}
-      <div className="flex-1 overflow-y-auto p-4 flex flex-col items-center justify-center">
+      <div className="flex-1 min-h-0 px-2 py-1 sm:px-3 sm:py-1.5 flex flex-col items-center justify-center overflow-hidden">
         {currentPage ? (
-          <div className="flex flex-col items-center w-full max-w-sm">
+          <div className="flex flex-col items-center w-full h-full min-h-0 max-w-3xl">
             {/* Navegación interna entre páginas */}
-            <div className="flex items-center justify-between w-full mb-2 px-1 text-xs text-gray-300 font-semibold">
+            <div className="flex items-center justify-between w-full mb-1.5 px-1 text-xs text-gray-300 font-semibold shrink-0">
               <button
                 id="edit-prev-page"
                 disabled={currentIndex === 0}
@@ -774,55 +825,65 @@ export default function EditPage({ document: initialDoc, onBack, onNavigateToCle
             {/* Contenedor del lienzo de página */}
             <div
               ref={pageContainerRef}
-              className="relative w-full aspect-[3/4] bg-neutral-900 border border-[#2C2C2E] rounded-2xl p-1 shadow-2xl flex items-center justify-center select-none overflow-hidden touch-none"
+              className="relative flex-1 min-h-0 w-full bg-neutral-900 border border-[#2C2C2E] rounded-2xl p-1 shadow-2xl flex items-center justify-center select-none overflow-hidden touch-none"
             >
-              <img
-                src={
-                  currentPage.adjustments.filter === 'original' &&
-                  (!currentPage.adjustments.rotation || currentPage.adjustments.rotation === 0) &&
-                  !currentPage.adjustments.crop
-                    ? currentPage.originalImage
-                    : currentPage.processedImage || currentPage.originalImage
-                }
-                alt={`Página ${currentIndex + 1}`}
-                onLoad={(e) => {
-                  const target = e.currentTarget;
-                  import('../utils/imageDiagnostic').then(({ recordImageDiagnostic }) => {
-                    recordImageDiagnostic(
-                      'stage_7_rendered_image',
-                      'Final DOM Image Preview',
-                      'src/pages/EditPage.tsx',
-                      'img.onLoad',
-                      'target.src',
-                      target.src,
-                      {
-                        naturalWidth: target.naturalWidth,
-                        naturalHeight: target.naturalHeight,
-                        clientWidth: target.clientWidth,
-                        clientHeight: target.clientHeight,
-                        activeFilter: currentPage.adjustments?.filter,
-                      }
-                    );
-                  });
-                }}
-                className="max-w-full max-h-full object-contain rounded-xl pointer-events-none"
-                referrerPolicy="no-referrer"
-              />
+              <div className="relative w-full h-full flex items-center justify-center overflow-hidden">
+                <img
+                  ref={previewImgRef}
+                  src={
+                    (currentPage.adjustments.filter === 'original' ||
+                      (currentPage.adjustments.filter === 'restore' && isMaskDrawingMode)) &&
+                    (!currentPage.adjustments.rotation || currentPage.adjustments.rotation === 0) &&
+                    !currentPage.adjustments.crop
+                      ? currentPage.originalImage
+                      : currentPage.processedImage || currentPage.originalImage
+                  }
+                  alt={`Página ${currentIndex + 1}`}
+                  onLoad={(e) => {
+                    const target = e.currentTarget;
+                    import('../utils/imageDiagnostic').then(({ recordImageDiagnostic }) => {
+                      recordImageDiagnostic(
+                        'stage_7_rendered_image',
+                        'Final DOM Image Preview',
+                        'src/pages/EditPage.tsx',
+                        'img.onLoad',
+                        'target.src',
+                        target.src,
+                        {
+                          naturalWidth: target.naturalWidth,
+                          naturalHeight: target.naturalHeight,
+                          clientWidth: target.clientWidth,
+                          clientHeight: target.clientHeight,
+                          activeFilter: currentPage.adjustments?.filter,
+                        }
+                      );
+                    });
+                  }}
+                  className="w-full h-full object-contain rounded-xl pointer-events-none"
+                  referrerPolicy="no-referrer"
+                />
 
-              {/* Canvas de máscara para modo de dibujo (filtro sin arrugas) */}
-              {isMaskDrawingMode && (
-                <>
+                {/* Canvas de máscara para modo de dibujo (filtro sin arrugas) */}
+                {isMaskDrawingMode && (
                   <canvas
                     ref={maskCanvasRef}
                     onMouseDown={handleStartMaskDrawing}
                     onMouseMove={handleDrawMask}
                     onMouseUp={handleStopMaskDrawing}
                     onMouseLeave={handleStopMaskDrawing}
-                    className="absolute top-0 left-0 w-full h-full cursor-crosshair z-30"
+                    onTouchStart={handleStartMaskDrawing}
+                    onTouchMove={handleDrawMask}
+                    onTouchEnd={handleStopMaskDrawing}
+                    onTouchCancel={handleStopMaskDrawing}
+                    className="absolute top-0 left-0 w-full h-full cursor-crosshair z-30 rounded-xl"
                     style={{ touchAction: 'none' }}
                   />
-                  
-                  {/* Controles de máscara */}
+                )}
+              </div>
+
+              {/* Controles e instrucciones de máscara */}
+              {isMaskDrawingMode && (
+                <>
                   <div className="absolute top-2 right-2 flex gap-2 z-40">
                     <button
                       onClick={handleClearMask}
@@ -848,7 +909,6 @@ export default function EditPage({ document: initialDoc, onBack, onNavigateToCle
                     </button>
                   </div>
                   
-                  {/* Instrucciones */}
                   <div className="absolute bottom-2 left-1/2 transform -translate-x-1/2 bg-black/70 text-white px-4 py-2 rounded-lg text-xs z-40">
                     Dibuja sobre las líneas de pliegue para eliminarlas
                   </div>
@@ -949,7 +1009,7 @@ export default function EditPage({ document: initialDoc, onBack, onNavigateToCle
       </div>
 
       {/* Controles de la Pestaña Activa en la barra inferior */}
-      <div className="bg-[#1C1C1E] border-t border-[#2C2C2E] p-4 shrink-0">
+      <div className="bg-[#1C1C1E] border-t border-[#2C2C2E] px-3.5 py-2.5 shrink-0">
         {/* Pestaña: Páginas (Girar, Subir, Bajar, Eliminar) */}
         {activeTab === 'pages' && (
           <div className="flex flex-col gap-3.5 animate-fade-in">
@@ -1186,7 +1246,7 @@ export default function EditPage({ document: initialDoc, onBack, onNavigateToCle
         />
 
         {/* Barra de Tabs inferiores */}
-        <div className="flex border-t border-white/5 mt-4 pt-3.5 justify-around">
+        <div className="flex border-t border-white/5 mt-2.5 pt-2 justify-around">
           <button
             id="tab-btn-pages"
             onClick={() => setActiveTab('pages')}

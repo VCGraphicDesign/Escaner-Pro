@@ -1129,12 +1129,14 @@ function validateCanvasOutput(canvas: HTMLCanvasElement, backupData: ImageData):
     return;
   }
 
-  // Muestreo rápido de luminancia
+  // Muestreo de luminancia del resultado y del respaldo
   let totalLum = 0;
+  let totalBackupLum = 0;
   let samples = 0;
   let nonZeroCount = 0;
   const step = Math.max(1, Math.floor(len / 4000)) * 4;
 
+  const bData = backupData.data;
   for (let i = 0; i < len; i += step) {
     const r = data[i];
     const g = data[i + 1];
@@ -1145,13 +1147,15 @@ function validateCanvasOutput(canvas: HTMLCanvasElement, backupData: ImageData):
       nonZeroCount++;
     }
     totalLum += 0.299 * r + 0.587 * g + 0.114 * b;
+    totalBackupLum += 0.299 * bData[i] + 0.587 * bData[i + 1] + 0.114 * bData[i + 2];
     samples++;
   }
 
   const avgLum = samples > 0 ? totalLum / samples : 0;
+  const avgBackupLum = samples > 0 ? totalBackupLum / samples : 0;
 
-  // Si más del 99% de las muestras son exactamente 0 o la luminancia media es casi nula (< 3)
-  if (samples > 0 && (nonZeroCount / samples < 0.01 || avgLum < 3)) {
+  // Rechazar colapso de brillo o salida corrupta
+  if (samples > 0 && (nonZeroCount / samples < 0.01 || avgLum < 4 || (avgBackupLum > 20 && avgLum < avgBackupLum * 0.4))) {
     console.warn('Restoration output validation failed (black/corrupt image detected). Restoring backup.');
     ctx.putImageData(backupData, 0, 0);
   }
@@ -1159,10 +1163,10 @@ function validateCanvasOutput(canvas: HTMLCanvasElement, backupData: ImageData):
 
 /**
  * RESTAURADOR DE DOCUMENTOS (Sin Arrugas ni Pliegues):
- * - Modo A (Automático / sin máscara): Corrección de iluminación conservadora y localizada
- *   en sombras de pliegues/arrugas detectadas sin tocar texto ni blanquear toda la página.
- * - Modo B (Manual / con máscara): Inpainting localizado con OpenCV Telea (radio 2, dilación 3x3)
- *   estrictamente dentro de las zonas pintadas por el usuario.
+ * - Modo A (Manual / con máscara de usuario): Corrección localizada de iluminación y sombras
+ *   estrictamente dentro del trazo pintado, protegiendo trazos de texto oscuros de alta frecuencia
+ *   y preservando los canales cromáticos y textura del papel.
+ * - Modo B (Automático / sin máscara): Corrección localizada conservadora en valles de sombra detectados.
  */
 export async function restoreDocument(canvas: HTMLCanvasElement, maskCanvas?: HTMLCanvasElement) {
   // Si no se proporcionó máscara, aplicar la corrección automática localizada y segura
@@ -1178,20 +1182,291 @@ export async function restoreDocument(canvas: HTMLCanvasElement, maskCanvas?: HT
     let hasMaskContent = false;
     const step = Math.max(1, Math.floor(maskData.length / 2000)) * 4;
     for (let i = 0; i < maskData.length; i += step) {
-      if (maskData[i] > 50 || maskData[i + 1] > 50 || maskData[i + 2] > 50) {
+      if (maskData[i] > 30 || maskData[i + 1] > 30 || maskData[i + 2] > 30) {
         hasMaskContent = true;
         break;
       }
     }
 
     if (!hasMaskContent) {
-      // Máscara vacía: aplicar modo automático conservador
-      await applyConservativeWrinkleShadowCorrection(canvas);
+      // Máscara vacía: no aplicar cambios, mantener original intacto
       return;
     }
   }
 
-  await removeWrinklesWithInpainting(canvas, maskCanvas);
+  // Ejecutar corrección localizada neuronal con DocShadow ONNX WASM
+  await applyDocShadowMaskedRestoration(canvas, maskCanvas);
+}
+
+/**
+ * Localized Fold Shadow Removal with Frequency/Illumination Separation
+ * (Modo Manual con máscara para Sin Arrugas / Restauración):
+ * 
+ * 1. Mantiene el lienzo RGB original intacto como fuente de reconstrucción y detalle de alta frecuencia.
+ * 2. Extrae la máscara basada exclusivamente en los canales RGB (sin usar Alpha de la máscara opaca).
+ * 3. Define una banda de análisis alrededor de la selección y muestrea únicamente píxeles no enmascarados.
+ * 4. Descarta trazos de texto u oscuridades extremas de la referencia para no contaminar el fondo.
+ * 5. Estima una superficie de referencia 2D suave e interpolada (L_ref) que se adapta a fondos blancos, coloreados o gradientes.
+ * 6. Mide el déficit de sombra (L_ref - L_actual) / L_ref y separa la variación de iluminación de baja frecuencia del detalle de alta frecuencia.
+ * 7. Protege el texto oscuro de alta frecuencia sin castigar pliegues de bordes nítidos.
+ * 8. Reconstruye el color preservando las proporciones cromáticas originales (R:G:B) sin teñir ni alterar el matiz.
+ * 9. Difumina suavemente los bordes con ponderación espacial para una transición invisible sin halos ni costuras.
+ * 10. Deja el 100% de los píxeles fuera de la máscara inalterados.
+ */
+export async function applyLocalizedMaskedWrinkleCorrection(canvas: HTMLCanvasElement, maskCanvas: HTMLCanvasElement) {
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx || canvas.width === 0 || canvas.height === 0) return;
+
+  const w = canvas.width;
+  const h = canvas.height;
+  const originalImageData = ctx.getImageData(0, 0, w, h);
+  const data = originalImageData.data;
+
+  // Respaldo de seguridad para revertir en caso de anomalía
+  const backupData = ctx.getImageData(0, 0, w, h);
+
+  try {
+    const maskCtx = maskCanvas.getContext('2d', { willReadFrequently: true });
+    if (!maskCtx) return;
+
+    const rawMaskData = maskCtx.getImageData(0, 0, maskCanvas.width, maskCanvas.height).data;
+
+    // 1. Extraer máscara binaria (exclusivamente canales RGB) y calcular caja envolvente
+    const maskWeights = new Float32Array(w * h);
+    const maskScaleX = maskCanvas.width / w;
+    const maskScaleY = maskCanvas.height / h;
+    const mWidth = maskCanvas.width;
+
+    let minX = w, maxX = 0, minY = h, maxY = 0;
+    let maskedCount = 0;
+
+    for (let y = 0; y < h; y++) {
+      const my = Math.min(maskCanvas.height - 1, Math.floor(y * maskScaleY));
+      for (let x = 0; x < w; x++) {
+        const mx = Math.min(maskCanvas.width - 1, Math.floor(x * maskScaleX));
+        const mIdx = (my * mWidth + mx) * 4;
+        // Solo canales RGB determinan la cobertura de la máscara
+        const val = Math.max(rawMaskData[mIdx], rawMaskData[mIdx + 1], rawMaskData[mIdx + 2]);
+        if (val > 25) {
+          maskWeights[y * w + x] = Math.min(1.0, val / 255);
+          maskedCount++;
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+
+    // Si no hay píxeles seleccionados en la máscara, salir sin modificar
+    if (maskedCount === 0 || minX > maxX || minY > maxY) {
+      return;
+    }
+
+    // 2. Extraer mapa de luminancia de la imagen original
+    const lumMap = new Float32Array(w * h);
+    for (let i = 0; i < data.length; i += 4) {
+      lumMap[i / 4] = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+    }
+
+    // 3. Suavizado gaussiano espacial 3x3 ligero para generar transición suave sin saltos de borde
+    const smoothedMask = new Float32Array(w * h);
+    const pad = 4;
+    const bbMinX = Math.max(1, minX - pad);
+    const bbMaxX = Math.min(w - 2, maxX + pad);
+    const bbMinY = Math.max(1, minY - pad);
+    const bbMaxY = Math.min(h - 2, maxY + pad);
+
+    for (let y = bbMinY; y <= bbMaxY; y++) {
+      for (let x = bbMinX; x <= bbMaxX; x++) {
+        const idx = y * w + x;
+        const center = maskWeights[idx];
+        if (center > 0 || maskWeights[idx - 1] > 0 || maskWeights[idx + 1] > 0 || maskWeights[idx - w] > 0 || maskWeights[idx + w] > 0) {
+          smoothedMask[idx] = (
+            maskWeights[idx - w - 1] + 2 * maskWeights[idx - w] + maskWeights[idx - w + 1] +
+            2 * maskWeights[idx - 1] + 4 * center + 2 * maskWeights[idx + 1] +
+            maskWeights[idx + w - 1] + 2 * maskWeights[idx + w] + maskWeights[idx + w + 1]
+          ) / 16;
+        }
+      }
+    }
+
+    // 4. Estimar superficie local de referencia del papel/fondo a partir del vecindario no enmascarado
+    const searchMargin = Math.max(25, Math.min(80, Math.round(Math.max(maxX - minX, maxY - minY) * 0.3)));
+    const sMinX = Math.max(0, minX - searchMargin);
+    const sMaxX = Math.min(w - 1, maxX + searchMargin);
+    const sMinY = Math.max(0, minY - searchMargin);
+    const sMaxY = Math.min(h - 1, maxY + searchMargin);
+
+    const sWidth = Math.max(1, sMaxX - sMinX + 1);
+    const sHeight = Math.max(1, sMaxY - sMinY + 1);
+
+    // Rejilla de celdas locales para estimar la superficie suave
+    const gridCols = Math.max(4, Math.min(20, Math.ceil(sWidth / 28)));
+    const gridRows = Math.max(4, Math.min(20, Math.ceil(sHeight / 28)));
+    const gridLum = new Float32Array(gridCols * gridRows);
+
+    const cellW = sWidth / gridCols;
+    const cellH = sHeight / gridRows;
+
+    const totalGlobalSamples: number[] = [];
+
+    for (let gy = 0; gy < gridRows; gy++) {
+      const cy0 = Math.floor(sMinY + gy * cellH);
+      const cy1 = Math.floor(sMinY + (gy + 1) * cellH);
+      const searchY0 = Math.max(sMinY, cy0 - Math.floor(cellH * 0.5));
+      const searchY1 = Math.min(sMaxY, cy1 + Math.floor(cellH * 0.5));
+
+      for (let gx = 0; gx < gridCols; gx++) {
+        const cx0 = Math.floor(sMinX + gx * cellW);
+        const cx1 = Math.floor(sMinX + (gx + 1) * cellW);
+        const searchX0 = Math.max(sMinX, cx0 - Math.floor(cellW * 0.5));
+        const searchX1 = Math.min(sMaxX, cx1 + Math.floor(cellW * 0.5));
+
+        const cellSamples: number[] = [];
+        const step = Math.max(1, Math.floor(Math.sqrt((searchX1 - searchX0) * (searchY1 - searchY0)) / 15));
+
+        for (let y = searchY0; y <= searchY1; y += step) {
+          for (let x = searchX0; x <= searchX1; x += step) {
+            const idx = y * w + x;
+            // Muestrear estrictamente fuera de la máscara
+            if (maskWeights[idx] === 0 && smoothedMask[idx] < 0.01) {
+              const lum = lumMap[idx];
+              // Descartar oscuridad extrema
+              if (lum >= 30) {
+                cellSamples.push(lum);
+              }
+            }
+          }
+        }
+
+        if (cellSamples.length >= 3) {
+          cellSamples.sort((a, b) => a - b);
+          // Percentil 75-80 para capturar el fondo limpio sin sesgo por tinta
+          const pIdx = Math.min(cellSamples.length - 1, Math.floor(cellSamples.length * 0.75));
+          gridLum[gy * gridCols + gx] = cellSamples[pIdx];
+          totalGlobalSamples.push(cellSamples[pIdx]);
+        } else {
+          gridLum[gy * gridCols + gx] = -1; // Marcador de celda para interpolar de vecinos
+        }
+      }
+    }
+
+    // Referencia global de respaldo
+    let fallbackRef = 220;
+    if (totalGlobalSamples.length > 0) {
+      totalGlobalSamples.sort((a, b) => a - b);
+      fallbackRef = totalGlobalSamples[Math.floor(totalGlobalSamples.length * 0.75)];
+    }
+
+    // Rellenar celdas sin muestras suficientes buscando la celda válida más cercana
+    for (let gy = 0; gy < gridRows; gy++) {
+      for (let gx = 0; gx < gridCols; gx++) {
+        const gIdx = gy * gridCols + gx;
+        if (gridLum[gIdx] < 0) {
+          let nearestVal = fallbackRef;
+          let minDist = Infinity;
+          for (let ngy = 0; ngy < gridRows; ngy++) {
+            for (let ngx = 0; ngx < gridCols; ngx++) {
+              const nIdx = ngy * gridCols + ngx;
+              if (gridLum[nIdx] >= 0) {
+                const dist = Math.hypot(gy - ngy, gx - ngx);
+                if (dist < minDist) {
+                  minDist = dist;
+                  nearestVal = gridLum[nIdx];
+                }
+              }
+            }
+          }
+          gridLum[gIdx] = nearestVal;
+        }
+      }
+    }
+
+    // Interpolación bilineal para superficie local continua L_ref(x, y)
+    const getLocalRefLum = (x: number, y: number): number => {
+      const gx = Math.max(0, Math.min(gridCols - 1, ((x - sMinX) / sWidth) * gridCols - 0.5));
+      const gy = Math.max(0, Math.min(gridRows - 1, ((y - sMinY) / sHeight) * gridRows - 0.5));
+
+      const gx0 = Math.floor(gx);
+      const gy0 = Math.floor(gy);
+      const gx1 = Math.min(gridCols - 1, gx0 + 1);
+      const gy1 = Math.min(gridRows - 1, gy0 + 1);
+
+      const fx = gx - gx0;
+      const fy = gy - gy0;
+
+      const v00 = gridLum[gy0 * gridCols + gx0];
+      const v10 = gridLum[gy0 * gridCols + gx1];
+      const v01 = gridLum[gy1 * gridCols + gx0];
+      const v11 = gridLum[gy1 * gridCols + gx1];
+
+      const top = v00 * (1 - fx) + v10 * fx;
+      const bottom = v01 * (1 - fx) + v11 * fx;
+      return top * (1 - fy) + bottom * fy;
+    };
+
+    // 5. Aplicar corrección de iluminación y compensación de sombra de baja frecuencia
+    for (let y = bbMinY; y <= bbMaxY; y++) {
+      for (let x = bbMinX; x <= bbMaxX; x++) {
+        const idx = y * w + x;
+        const mWeight = smoothedMask[idx];
+
+        if (mWeight > 0.005) {
+          const currentLum = lumMap[idx];
+          const refPaperLum = Math.max(30, getLocalRefLum(x, y));
+
+          // Déficit de sombra relativo al fondo local limpio [0..1]
+          const shadowDeficit = refPaperLum > currentLum
+            ? (refPaperLum - currentLum) / Math.max(1.0, refPaperLum)
+            : 0;
+
+          if (shadowDeficit > 0.005) {
+            // Protección de texto: discriminar tinta oscura vs sombra continua de pliegue
+            let textProtection = 0;
+            if (currentLum < refPaperLum * 0.50) {
+              const darkness = Math.max(0, Math.min(1.0, (refPaperLum * 0.50 - currentLum) / (refPaperLum * 0.35)));
+
+              // Magnitud de gradiente local
+              const gradX = Math.abs(lumMap[idx + 1] - lumMap[idx - 1]);
+              const gradY = Math.abs(lumMap[idx + w] - lumMap[idx - w]);
+              const gradMag = gradX + gradY;
+              const edgeFactor = Math.min(1.0, gradMag / 50);
+
+              textProtection = darkness * (0.3 + 0.7 * edgeFactor);
+            }
+
+            // Ponderación espacial efectiva con desvanecimiento en el borde
+            const effectiveWeight = mWeight * (1.0 - 0.75 * textProtection);
+
+            if (effectiveWeight > 0.005) {
+              // Compensación proporcional que relumina la sombra hacia el fondo de referencia
+              const compensationRatio = Math.min(0.95, 0.40 + shadowDeficit * 0.80);
+              const liftAmount = (refPaperLum - currentLum) * compensationRatio * effectiveWeight;
+              const targetLum = Math.min(refPaperLum, currentLum + liftAmount);
+
+              // Ganancia multiplicativa acotada para preservar proporciones cromáticas
+              const gain = targetLum / Math.max(1.0, currentLum);
+              const boundedGain = Math.min(1.50, Math.max(1.0, gain));
+
+              const pIdx = idx * 4;
+              data[pIdx] = Math.min(255, Math.round(data[pIdx] * boundedGain));
+              data[pIdx + 1] = Math.min(255, Math.round(data[pIdx + 1] * boundedGain));
+              data[pIdx + 2] = Math.min(255, Math.round(data[pIdx + 2] * boundedGain));
+            }
+          }
+        }
+      }
+    }
+
+    ctx.putImageData(originalImageData, 0, 0);
+
+    // 6. Validar que la salida sea válida y segura
+    validateCanvasOutput(canvas, backupData);
+  } catch (err) {
+    console.error('Error en corrección localizada de arrugas:', err);
+    ctx.putImageData(backupData, 0, 0);
+  }
 }
 
 /**
