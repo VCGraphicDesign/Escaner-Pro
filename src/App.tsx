@@ -30,6 +30,21 @@ export default function App() {
   const handleQuickScanToEditor = (
     processedPages: Array<{ id: string; originalImage: string; processedImage: string }>
   ) => {
+    // [ORIGINAL-DIAGNOSTIC] Registro de creación de documento para editor
+    import('./utils/imageDiagnostic').then(({ recordImageDiagnostic }) => {
+      processedPages.forEach((p, idx) => {
+        recordImageDiagnostic(
+          'stage_4_editor_handoff',
+          `App Handoff to Editor (Page ${idx + 1})`,
+          'src/App.tsx',
+          'handleQuickScanToEditor',
+          'p.originalImage',
+          p.originalImage,
+          { pageId: p.id, index: idx }
+        );
+      });
+    });
+
     const scannedPages: ScannedPage[] = processedPages.map((p) => ({
       id: p.id,
       originalImage: p.originalImage,

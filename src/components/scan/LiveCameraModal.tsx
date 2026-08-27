@@ -122,25 +122,67 @@ export default function LiveCameraModal({ isOpen, onClose, onCapture }: LiveCame
   };
 
   // Capturar fotograma en máxima resolución nítida
-  const handleCapture = () => {
+  const handleCapture = async () => {
     const video = videoRef.current;
-    if (!video || !video.videoWidth || !video.videoHeight) return;
+    if (!video) return;
 
     // Efecto de flash visual
     setIsFlashing(true);
     setTimeout(() => setIsFlashing(false), 200);
 
-    // 1. Dibujar fotograma en máxima resolución
-    const fullCanvas = document.createElement('canvas');
-    fullCanvas.width = video.videoWidth;
-    fullCanvas.height = video.videoHeight;
-    const fullCtx = fullCanvas.getContext('2d', { willReadFrequently: true });
-    if (!fullCtx) return;
+    let base64Image: string | null = null;
+    let captureMethod = 'canvas';
 
-    fullCtx.drawImage(video, 0, 0, fullCanvas.width, fullCanvas.height);
+    // 1. Intentar usar la API estándar ImageCapture si está soportada por el navegador
+    try {
+      const activeTrack = stream?.getVideoTracks()[0];
+      if (activeTrack && typeof (window as any).ImageCapture !== 'undefined') {
+        const imageCapture = new (window as any).ImageCapture(activeTrack);
+        const blob = await imageCapture.takePhoto();
+        if (blob && blob.size > 0) {
+          base64Image = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
+          captureMethod = 'ImageCapture API';
+        }
+      }
+    } catch (e) {
+      console.warn('ImageCapture no disponible o falló, usando captura por Canvas:', e);
+    }
 
-    // 2. Exportar la imagen en ultra-alta calidad sin compresión destructiva
-    const base64Image = fullCanvas.toDataURL('image/jpeg', 0.98);
+    // 2. Fallback estándar de alta fidelidad: capturar fotograma exacto del video en canvas sin resampleo destructivo
+    if (!base64Image) {
+      if (!video.videoWidth || !video.videoHeight) return;
+      const fullCanvas = document.createElement('canvas');
+      fullCanvas.width = video.videoWidth;
+      fullCanvas.height = video.videoHeight;
+      const fullCtx = fullCanvas.getContext('2d', { willReadFrequently: true });
+      if (!fullCtx) return;
+
+      fullCtx.imageSmoothingEnabled = true;
+      fullCtx.imageSmoothingQuality = 'high';
+      fullCtx.drawImage(video, 0, 0, fullCanvas.width, fullCanvas.height);
+
+      base64Image = fullCanvas.toDataURL('image/jpeg', 0.98);
+      captureMethod = 'Web Canvas (Video Frame)';
+    }
+
+    // [ORIGINAL-DIAGNOSTIC] Registro de captura web
+    const capturedDataUrl = base64Image;
+    import('../../utils/imageDiagnostic').then(({ recordImageDiagnostic }) => {
+      recordImageDiagnostic(
+        'stage_1_capture',
+        `Camera Capture (${captureMethod})`,
+        'src/components/scan/LiveCameraModal.tsx',
+        'handleCapture',
+        'base64Image',
+        capturedDataUrl,
+        { method: captureMethod }
+      );
+    });
 
     // 3. Detener stream y enviar la imagen capturada
     stopStream();

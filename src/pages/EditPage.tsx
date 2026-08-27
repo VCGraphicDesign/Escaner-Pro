@@ -91,6 +91,22 @@ export default function EditPage({ document: initialDoc, onBack, onNavigateToCle
     setDoc(initialDoc);
     setHistory([initialDoc]);
     setHistoryIndex(0);
+
+    // [ORIGINAL-DIAGNOSTIC] Registro de página actual al entrar a EditPage
+    if (initialDoc.pages && initialDoc.pages.length > 0) {
+      const p = initialDoc.pages[0];
+      import('../utils/imageDiagnostic').then(({ recordImageDiagnostic }) => {
+        recordImageDiagnostic(
+          'stage_5_current_page',
+          'EditPage Current Page (originalImage)',
+          'src/pages/EditPage.tsx',
+          'useEffect[initialDoc]',
+          'p.originalImage',
+          p.originalImage,
+          { docId: initialDoc.id, filter: p.adjustments?.filter }
+        );
+      });
+    }
   }, [initialDoc]);
 
   // Agregar estado al historial
@@ -174,7 +190,25 @@ export default function EditPage({ document: initialDoc, onBack, onNavigateToCle
         filter: filterType,
       };
 
-      const newProcessed = await processPageImage(currentPage.originalImage, updatedAdjustments);
+      // Si el filtro seleccionado es 'original', retornar directamente la imagen original sin procesar ni pasar por Canvas
+      let newProcessed: string;
+      if (filterType === 'original') {
+        newProcessed = currentPage.originalImage;
+        // [ORIGINAL-DIAGNOSTIC] Registro de selección del filtro Original
+        import('../utils/imageDiagnostic').then(({ recordImageDiagnostic }) => {
+          recordImageDiagnostic(
+            'stage_6_original_selection',
+            'Original Filter Selection',
+            'src/pages/EditPage.tsx',
+            'handleChangeFilter',
+            'currentPage.originalImage',
+            currentPage.originalImage,
+            { filterType, previousFilter: currentPage.adjustments?.filter }
+          );
+        });
+      } else {
+        newProcessed = await processPageImage(currentPage.originalImage, updatedAdjustments);
+      }
 
       const nextPages = [...doc.pages];
       nextPages[currentIndex] = {
@@ -743,8 +777,34 @@ export default function EditPage({ document: initialDoc, onBack, onNavigateToCle
               className="relative w-full aspect-[3/4] bg-neutral-900 border border-[#2C2C2E] rounded-2xl p-1 shadow-2xl flex items-center justify-center select-none overflow-hidden touch-none"
             >
               <img
-                src={currentPage.processedImage}
+                src={
+                  currentPage.adjustments.filter === 'original' &&
+                  (!currentPage.adjustments.rotation || currentPage.adjustments.rotation === 0) &&
+                  !currentPage.adjustments.crop
+                    ? currentPage.originalImage
+                    : currentPage.processedImage || currentPage.originalImage
+                }
                 alt={`Página ${currentIndex + 1}`}
+                onLoad={(e) => {
+                  const target = e.currentTarget;
+                  import('../utils/imageDiagnostic').then(({ recordImageDiagnostic }) => {
+                    recordImageDiagnostic(
+                      'stage_7_rendered_image',
+                      'Final DOM Image Preview',
+                      'src/pages/EditPage.tsx',
+                      'img.onLoad',
+                      'target.src',
+                      target.src,
+                      {
+                        naturalWidth: target.naturalWidth,
+                        naturalHeight: target.naturalHeight,
+                        clientWidth: target.clientWidth,
+                        clientHeight: target.clientHeight,
+                        activeFilter: currentPage.adjustments?.filter,
+                      }
+                    );
+                  });
+                }}
                 className="max-w-full max-h-full object-contain rounded-xl pointer-events-none"
                 referrerPolicy="no-referrer"
               />

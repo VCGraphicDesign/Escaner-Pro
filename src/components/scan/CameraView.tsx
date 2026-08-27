@@ -77,6 +77,17 @@ export default function CameraView({ onBack, onPagesCaptured }: CameraViewProps)
       });
 
       if (image && image.dataUrl) {
+        import('../../utils/imageDiagnostic').then(({ recordImageDiagnostic }) => {
+          recordImageDiagnostic(
+            'stage_1_capture_native',
+            'Camera Capture (Native Camera.getPhoto)',
+            'src/components/scan/CameraView.tsx',
+            'takeNativePhoto',
+            'image.dataUrl',
+            image.dataUrl,
+            { quality: 90, resultType: 'DataUrl' }
+          );
+        });
         await addScannedImage(image.dataUrl);
       }
     } catch (err: any) {

@@ -26,34 +26,9 @@ export default function CleanPage({ capturedPages, onBack, onFinishCleaning }: C
   const [activeTab, setActiveTab] = useState<TabType>('filtros');
   const [zoomLevel, setZoomLevel] = useState(1);
 
-  // Inicializar páginas y detectar bordes del documento automáticamente
+  // Inicializar páginas
   useEffect(() => {
-    let cancelled = false;
-
-    const initPages = async () => {
-      const initialized = await Promise.all(
-        capturedPages.map(async (page) => {
-          // Si ya tiene puntos de recorte, no los sobreescribimos
-          if (page.adjustments.crop) return page;
-          return {
-            ...page,
-            adjustments: {
-              ...page.adjustments,
-              crop: {
-                topLeft: { x: 0.05, y: 0.05 },
-                topRight: { x: 0.95, y: 0.05 },
-                bottomRight: { x: 0.95, y: 0.95 },
-                bottomLeft: { x: 0.05, y: 0.95 },
-              },
-            },
-          };
-        })
-      );
-      if (!cancelled) setPages(initialized);
-    };
-
-    initPages();
-    return () => { cancelled = true; };
+    setPages(capturedPages);
   }, [capturedPages]);
 
   const currentPage = pages[currentIndex];
@@ -222,7 +197,13 @@ export default function CleanPage({ capturedPages, onBack, onFinishCleaning }: C
         ) : (
           <div className="relative w-full h-full flex items-center justify-center overflow-hidden p-2">
             <ZoomableImage
-              src={currentPage.processedImage}
+              src={
+                currentPage.adjustments.filter === 'original' &&
+                (!currentPage.adjustments.rotation || currentPage.adjustments.rotation === 0) &&
+                !currentPage.adjustments.crop
+                  ? currentPage.originalImage
+                  : currentPage.processedImage || currentPage.originalImage
+              }
               alt="Documento Procesado"
               className="max-w-full max-h-full object-contain rounded-lg shadow-2xl"
             />

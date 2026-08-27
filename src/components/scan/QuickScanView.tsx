@@ -77,6 +77,19 @@ export default function QuickScanView({ onBack, onSavedToEditor }: QuickScanView
     setPendingCropImage(base64Image);
     setCurrentCropPoints(DEFAULT_CROP);
     setEditingPageId(pageIdToEdit);
+
+    // [ORIGINAL-DIAGNOSTIC] Registro de imagen pendiente de recorte
+    import('../../utils/imageDiagnostic').then(({ recordImageDiagnostic }) => {
+      recordImageDiagnostic(
+        'stage_2_pending',
+        'Pending Capture',
+        'src/components/scan/QuickScanView.tsx',
+        'openImmediateCrop',
+        'pendingCropImage',
+        base64Image,
+        { pageIdToEdit }
+      );
+    });
   };
 
   // Confirmar y aplicar recorte a la imagen actual
@@ -86,13 +99,45 @@ export default function QuickScanView({ onBack, onSavedToEditor }: QuickScanView
 
     try {
       const cropToApply = useFullImage ? null : currentCropPoints;
+
+      // 1. Obtener imagen original sin procesar o con pura geometría de recorte
+      let originalImage: string;
+      if (useFullImage) {
+        // Imagen completa intacta sin transformación ni re-codificación innecesaria
+        originalImage = pendingCropImage;
+      } else {
+        // Aplicar únicamente la geometría de recorte con valores neutros y sin filtros
+        originalImage = await processPageImage(pendingCropImage, {
+          brightness: 100,
+          contrast: 100,
+          sharpness: 0,
+          filter: 'original',
+          rotation: 0,
+          crop: cropToApply,
+        });
+      }
+
+      // 2. Generar imagen procesada según el modo de escaneo seleccionado (Auto o Escala de grises)
       const processedImage = await processPageImage(pendingCropImage, {
-        brightness: 105,
-        contrast: 112,
-        sharpness: scanMode === 'grayscale' ? 50 : 35,
+        brightness: 100,
+        contrast: scanMode === 'auto' ? 109 : 100,
+        sharpness: 0,
         filter: scanMode,
         rotation: 0,
         crop: cropToApply,
+      });
+
+      // [ORIGINAL-DIAGNOSTIC] Registro de originalBase64
+      import('../../utils/imageDiagnostic').then(({ recordImageDiagnostic }) => {
+        recordImageDiagnostic(
+          'stage_3_original_base64',
+          'QuickScan Original Source',
+          'src/components/scan/QuickScanView.tsx',
+          'handleConfirmCrop',
+          'originalImage',
+          originalImage,
+          { useFullImage, hadCrop: !useFullImage }
+        );
       });
 
       if (editingPageId) {
@@ -100,15 +145,15 @@ export default function QuickScanView({ onBack, onSavedToEditor }: QuickScanView
         setPages((prev) =>
           prev.map((p) =>
             p.id === editingPageId
-              ? { ...p, originalBase64: processedImage, processedBase64: processedImage, status: 'done' }
+              ? { ...p, originalBase64: originalImage, processedBase64: processedImage, status: 'done' }
               : p
           )
         );
       } else {
-        // Nueva página escaneada: la imagen recortada es la nueva base permanente
+        // Nueva página escaneada: originalBase64 preserva la captura pura
         const newPage: ScannedQuickPage = {
           id: `qpage_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-          originalBase64: processedImage,
+          originalBase64: originalImage,
           processedBase64: processedImage,
           status: 'done',
         };
@@ -235,12 +280,28 @@ export default function QuickScanView({ onBack, onSavedToEditor }: QuickScanView
   };
 
   const handleSendToEditor = () => {
-    const readyPages = pages.filter((p) => p.status === 'done' && p.processedBase64);
+    const readyPages = pages.filter((p) => p.status === 'done' && p.originalBase64);
+    
+    // [ORIGINAL-DIAGNOSTIC] Registro de traspaso al editor
+    import('../../utils/imageDiagnostic').then(({ recordImageDiagnostic }) => {
+      readyPages.forEach((p, idx) => {
+        recordImageDiagnostic(
+          'stage_4_editor_handoff',
+          `Editor Handoff (Page ${idx + 1})`,
+          'src/components/scan/QuickScanView.tsx',
+          'handleSendToEditor',
+          'p.originalBase64',
+          p.originalBase64,
+          { pageId: p.id, index: idx }
+        );
+      });
+    });
+
     onSavedToEditor(
       readyPages.map((p) => ({
         id: p.id,
         originalImage: p.originalBase64,
-        processedImage: p.processedBase64!,
+        processedImage: p.originalBase64,
       }))
     );
   };
@@ -326,8 +387,8 @@ export default function QuickScanView({ onBack, onSavedToEditor }: QuickScanView
                   style={{ position: 'relative', aspectRatio: '3/4', background: '#111118', borderRadius: 18, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.08)' }}
                 >
                   {/* Imagen */}
-                  {page.processedBase64 ? (
-                    <img src={page.processedBase64} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt={`Página ${idx + 1}`} />
+                  {page.originalBase64 ? (
+                    <img src={page.originalBase64} style={{ width: '100%', height: '100%', objectFit: 'contain' }} alt={`Página ${idx + 1}`} />
                   ) : (
                     <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                       <FileText size={32} style={{ color: '#374151' }} />

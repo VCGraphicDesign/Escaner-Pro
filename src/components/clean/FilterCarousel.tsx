@@ -40,7 +40,7 @@ export default function FilterCarousel({ selectedFilter, onChange }: FilterCarou
     },
     {
       id: 'grayscale',
-      name: 'Gris Papel',
+      name: 'B/N',
       description: 'Escala de grises',
       icon: <Zap size={18} />,
     },

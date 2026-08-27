@@ -123,8 +123,8 @@ export default function ToolsTab({ onStartNewScan }: ToolsTabProps) {
     });
     setImprovementAdjustments({
       brightness: 100,
-      contrast: 110,
-      sharpness: 50,
+      contrast: 109,
+      sharpness: 0,
       filter: 'auto',
     });
     setImprovedImagePreview(null);
@@ -132,7 +132,7 @@ export default function ToolsTab({ onStartNewScan }: ToolsTabProps) {
 
   // Seleccionar una página de un documento escaneado (para Recortar/Borrar/Mejorar)
   const handleSelectPage = (page: ScannedPage, docName: string, index: number) => {
-    setSelectedImage(page.processedImage);
+    setSelectedImage(page.originalImage || page.processedImage);
     setImageName(`${docName}_Pág${index + 1}_editado`);
     setShowDocSelector(false);
     resetToolStates();
@@ -798,7 +798,7 @@ export default function ToolsTab({ onStartNewScan }: ToolsTabProps) {
                           : 'bg-neutral-900 border-[#2C2C2E] text-gray-400 hover:text-white'
                       }`}
                     >
-                      Gris
+                      B/N
                     </button>
                     <button
                       onClick={() => setImprovementAdjustments(prev => ({ ...prev, filter: 'gamma' }))}
