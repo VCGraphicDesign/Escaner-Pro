@@ -873,18 +873,6 @@ export default function EditPage({ document: initialDoc, onBack, onNavigateToCle
           const xPos = (annot.x / 100) * canvas.width;
           const yPos = (annot.y / 100) * canvas.height;
 
-          // Fondo blanco con esquinas sutiles para legibilidad
-          ctx.fillStyle = 'rgba(255,255,255,0.92)';
-          const textMetrics = ctx.measureText(annot.text);
-          const padX = fontSizeInCanvas * 0.3;
-          const padY = fontSizeInCanvas * 0.2;
-          ctx.fillRect(
-            xPos - textMetrics.width / 2 - padX,
-            yPos - fontSizeInCanvas / 2 - padY,
-            textMetrics.width + padX * 2,
-            fontSizeInCanvas + padY * 2
-          );
-
           ctx.fillStyle = annot.color;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
@@ -1088,9 +1076,11 @@ export default function EditPage({ document: initialDoc, onBack, onNavigateToCle
               {/* Controles e instrucciones de máscara */}
               {isMaskDrawingMode && (
                 <>
-                  {/* Control de grosor del pincel */}
-                  <div className="absolute top-2 left-2 flex items-center gap-2 bg-[#1C1C1E]/90 backdrop-blur-md border border-[#2C2C2E] text-white px-3 py-1.5 rounded-xl text-xs z-40 shadow-xl">
-                    <span className="text-[11px] font-bold text-gray-300 whitespace-nowrap">Grosor del pincel:</span>
+                  {/* Control de grosor del pincel (Vertical en el lateral izquierdo inferior) */}
+                  <div className="absolute left-2.5 bottom-12 flex flex-col items-center gap-1.5 bg-[#1C1C1E]/90 backdrop-blur-md border border-[#2C2C2E] text-white px-2 py-2.5 rounded-xl text-xs z-40 shadow-xl select-none">
+                    <span className="text-[10px] font-bold text-[#2979FF] min-w-[28px] text-center">
+                      {restoreBrushSize}px
+                    </span>
                     <input
                       id="restore-brush-size-slider"
                       type="range"
@@ -1099,10 +1089,15 @@ export default function EditPage({ document: initialDoc, onBack, onNavigateToCle
                       step="2"
                       value={restoreBrushSize}
                       onChange={(e) => setRestoreBrushSize(Number(e.target.value))}
-                      className="w-20 sm:w-24 accent-[#2979FF] cursor-pointer"
+                      style={{
+                        writingMode: 'vertical-lr',
+                        direction: 'rtl',
+                        WebkitAppearance: 'slider-vertical',
+                      }}
+                      className="h-24 w-3.5 accent-[#2979FF] cursor-pointer"
                     />
-                    <span className="text-[11px] font-bold text-[#2979FF] min-w-[32px] text-right">
-                      {restoreBrushSize}px
+                    <span className="text-[9px] font-bold text-gray-300 uppercase tracking-wider text-center leading-tight">
+                      Grosor
                     </span>
                   </div>
 
@@ -1251,8 +1246,8 @@ export default function EditPage({ document: initialDoc, onBack, onNavigateToCle
                     onPointerUp={handlePointerUpElement}
                     className={`absolute touch-none font-bold whitespace-nowrap px-2.5 py-1 rounded-lg flex items-center gap-2 select-none transition-all ${
                       isSelected
-                        ? 'cursor-move bg-white/95 border-2 border-dashed border-[#2979FF] shadow-2xl ring-2 ring-[#2979FF]/30 z-30'
-                        : 'cursor-pointer bg-white/80 border border-neutral-300 shadow-md hover:border-[#2979FF]/50 z-20'
+                        ? 'cursor-move bg-transparent border-2 border-dashed border-[#2979FF] ring-2 ring-[#2979FF]/30 z-30'
+                        : 'cursor-pointer bg-transparent z-20'
                     }`}
                   >
                     <span>{annot.text}</span>
