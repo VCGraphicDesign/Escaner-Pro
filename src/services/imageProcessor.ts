@@ -1163,26 +1163,27 @@ function validateCanvasOutput(canvas: HTMLCanvasElement, backupData: ImageData):
 
 /**
  * RESTAURADOR DE DOCUMENTOS (Sin Arrugas ni Pliegues):
- * - Modo A (Manual / con máscara de usuario): Corrección localizada de iluminación y sombras
- *   estrictamente dentro del trazo pintado, protegiendo trazos de texto oscuros de alta frecuencia
- *   y preservando los canales cromáticos y textura del papel.
- * - Modo B (Automático / sin máscara): Corrección localizada conservadora en valles de sombra detectados.
+ * Pipeline nativo de reconstrucción localizada de pliegues y corrección de iluminación
+ * de baja frecuencia en Canvas 2D + TypeScript.
+ * 
+ * Flujo:
+ * - Si no hay máscara o está vacía, devuelve el lienzo intacto sin modificaciones.
+ * - Si el usuario marcó un pliegue, delega en applyLocalizedMaskedWrinkleCorrection.
  */
 export async function restoreDocument(canvas: HTMLCanvasElement, maskCanvas?: HTMLCanvasElement) {
-  // Si no se proporcionó máscara, aplicar la corrección automática localizada y segura
+  // Si no se proporcionó máscara, mantener el lienzo original intacto
   if (!maskCanvas) {
-    await applyConservativeWrinkleShadowCorrection(canvas);
     return;
   }
 
-  // Si hay máscara, verificar si contiene trazos dibujados
+  // Si hay máscara, verificar si contiene trazos dibujados (solo canales RGB)
   const maskCtx = maskCanvas.getContext('2d', { willReadFrequently: true });
   if (maskCtx) {
     const maskData = maskCtx.getImageData(0, 0, maskCanvas.width, maskCanvas.height).data;
     let hasMaskContent = false;
     const step = Math.max(1, Math.floor(maskData.length / 2000)) * 4;
     for (let i = 0; i < maskData.length; i += step) {
-      if (maskData[i] > 30 || maskData[i + 1] > 30 || maskData[i + 2] > 30) {
+      if (maskData[i] > 25 || maskData[i + 1] > 25 || maskData[i + 2] > 25) {
         hasMaskContent = true;
         break;
       }
@@ -1194,24 +1195,27 @@ export async function restoreDocument(canvas: HTMLCanvasElement, maskCanvas?: HT
     }
   }
 
-  // Ejecutar corrección localizada neuronal con DocShadow ONNX WASM
-  await applyDocShadowMaskedRestoration(canvas, maskCanvas);
+  // Ejecutar el motor de reconstrucción localizada de pliegues
+  await applyLocalizedMaskedWrinkleCorrection(canvas, maskCanvas);
 }
 
 /**
- * Localized Fold Shadow Removal with Frequency/Illumination Separation
- * (Modo Manual con máscara para Sin Arrugas / Restauración):
+ * Localized Crease Reconstruction & Direct Surface Restoration Engine
+ * (Motor nativo puro en Canvas 2D / TypeScript):
  * 
- * 1. Mantiene el lienzo RGB original intacto como fuente de reconstrucción y detalle de alta frecuencia.
- * 2. Extrae la máscara basada exclusivamente en los canales RGB (sin usar Alpha de la máscara opaca).
- * 3. Define una banda de análisis alrededor de la selección y muestrea únicamente píxeles no enmascarados.
- * 4. Descarta trazos de texto u oscuridades extremas de la referencia para no contaminar el fondo.
- * 5. Estima una superficie de referencia 2D suave e interpolada (L_ref) que se adapta a fondos blancos, coloreados o gradientes.
- * 6. Mide el déficit de sombra (L_ref - L_actual) / L_ref y separa la variación de iluminación de baja frecuencia del detalle de alta frecuencia.
- * 7. Protege el texto oscuro de alta frecuencia sin castigar pliegues de bordes nítidos.
- * 8. Reconstruye el color preservando las proporciones cromáticas originales (R:G:B) sin teñir ni alterar el matiz.
- * 9. Difumina suavemente los bordes con ponderación espacial para una transición invisible sin halos ni costuras.
- * 10. Deja el 100% de los píxeles fuera de la máscara inalterados.
+ * 1. Extrae la máscara binaria del usuario y su caja envolvente mínima exacta.
+ * 2. Delimita una región de análisis local (ROI) con margen adaptable [24..96px].
+ * 3. Calcula la luminancia original Y = 0.299R + 0.587G + 0.114B únicamente dentro del ROI.
+ * 4. Analiza gradientes Sobel para detección de bordes y preservación de texto.
+ * 5. Muestrea píxeles limpios no enmascarados fuera de la zona del pliegue en una cuadrícula 2D adaptable.
+ * 6. Construye una superficie de referencia continua y suave (L_ref) mediante interpolación bilineal.
+ * 7. Calcula la perturbación real del pliegue (Delta = Y - L_ref) tanto para valles de sombra como para crestas especulares.
+ * 8. Aplica protección contextual a trazos oscuros y caracteres de texto impreso.
+ * 9. Corrige la perturbación directamente hacia la superficie de referencia con aplicación de peso en un único paso.
+ * 10. Preserva estrictamente las razones cromáticas originales R:G:B (sin alterar matiz en fondos blancos o coloreados).
+ * 11. Aplica un desvanecimiento espacial suave acotado a la máscara (sin halos ni costuras).
+ * 12. Escribe únicamente la región corregida sobre el lienzo original dejando el resto 100% inalterado.
+ * 13. Valida la integridad de la salida contra anomalías o colapsos numéricos.
  */
 export async function applyLocalizedMaskedWrinkleCorrection(canvas: HTMLCanvasElement, maskCanvas: HTMLCanvasElement) {
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
@@ -1219,10 +1223,8 @@ export async function applyLocalizedMaskedWrinkleCorrection(canvas: HTMLCanvasEl
 
   const w = canvas.width;
   const h = canvas.height;
-  const originalImageData = ctx.getImageData(0, 0, w, h);
-  const data = originalImageData.data;
 
-  // Respaldo de seguridad para revertir en caso de anomalía
+  // Respaldo de seguridad completo para revertir en caso de anomalía
   const backupData = ctx.getImageData(0, 0, w, h);
 
   try {
@@ -1231,8 +1233,9 @@ export async function applyLocalizedMaskedWrinkleCorrection(canvas: HTMLCanvasEl
 
     const rawMaskData = maskCtx.getImageData(0, 0, maskCanvas.width, maskCanvas.height).data;
 
-    // 1. Extraer máscara binaria (exclusivamente canales RGB) y calcular caja envolvente
-    const maskWeights = new Float32Array(w * h);
+    // -------------------------------------------------------------
+    // PASO 1: Extraer máscara binaria (solo RGB) y caja envolvente
+    // -------------------------------------------------------------
     const maskScaleX = maskCanvas.width / w;
     const maskScaleY = maskCanvas.height / h;
     const mWidth = maskCanvas.width;
@@ -1240,15 +1243,14 @@ export async function applyLocalizedMaskedWrinkleCorrection(canvas: HTMLCanvasEl
     let minX = w, maxX = 0, minY = h, maxY = 0;
     let maskedCount = 0;
 
-    for (let y = 0; y < h; y++) {
+    // Escaneo rápido de límites
+    for (let y = 0; y < h; y += 2) {
       const my = Math.min(maskCanvas.height - 1, Math.floor(y * maskScaleY));
-      for (let x = 0; x < w; x++) {
+      for (let x = 0; x < w; x += 2) {
         const mx = Math.min(maskCanvas.width - 1, Math.floor(x * maskScaleX));
         const mIdx = (my * mWidth + mx) * 4;
-        // Solo canales RGB determinan la cobertura de la máscara
         const val = Math.max(rawMaskData[mIdx], rawMaskData[mIdx + 1], rawMaskData[mIdx + 2]);
         if (val > 25) {
-          maskWeights[y * w + x] = Math.min(1.0, val / 255);
           maskedCount++;
           if (x < minX) minX = x;
           if (x > maxX) maxX = x;
@@ -1258,135 +1260,177 @@ export async function applyLocalizedMaskedWrinkleCorrection(canvas: HTMLCanvasEl
       }
     }
 
-    // Si no hay píxeles seleccionados en la máscara, salir sin modificar
     if (maskedCount === 0 || minX > maxX || minY > maxY) {
-      return;
+      return; // Máscara sin píxeles válidos: retornar original intacto
     }
 
-    // 2. Extraer mapa de luminancia de la imagen original
-    const lumMap = new Float32Array(w * h);
-    for (let i = 0; i < data.length; i += 4) {
-      lumMap[i / 4] = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+    // Refinar límites a paso 1px alrededor de los extremos detectados
+    minX = Math.max(0, minX - 2);
+    maxX = Math.min(w - 1, maxX + 2);
+    minY = Math.max(0, minY - 2);
+    maxY = Math.min(h - 1, maxY + 2);
+
+    const maskW = maxX - minX + 1;
+    const maskH = maxY - minY + 1;
+
+    // -------------------------------------------------------------
+    // PASO 2: Delimitar región de análisis local (ROI)
+    // -------------------------------------------------------------
+    const margin = Math.max(24, Math.min(96, Math.round(Math.max(maskW, maskH) * 0.75)));
+    const roiX0 = Math.max(0, minX - margin);
+    const roiX1 = Math.min(w - 1, maxX + margin);
+    const roiY0 = Math.max(0, minY - margin);
+    const roiY1 = Math.min(h - 1, maxY + margin);
+
+    const roiW = roiX1 - roiX0 + 1;
+    const roiH = roiY1 - roiY0 + 1;
+    const roiTotal = roiW * roiH;
+
+    // Extraer ImageData exclusivamente para la región ROI (óptimo en memoria y CPU)
+    const roiImageData = ctx.getImageData(roiX0, roiY0, roiW, roiH);
+    const roiData = roiImageData.data;
+
+    // -------------------------------------------------------------
+    // PASO 3: Asignar arreglos tipados locales y calcular luminancia
+    // -------------------------------------------------------------
+    const maskWeights = new Float32Array(roiTotal);
+    const lum = new Float32Array(roiTotal);
+
+    for (let ry = 0; ry < roiH; ry++) {
+      const gy = roiY0 + ry;
+      const my = Math.min(maskCanvas.height - 1, Math.floor(gy * maskScaleY));
+      for (let rx = 0; rx < roiW; rx++) {
+        const gx = roiX0 + rx;
+        const mx = Math.min(maskCanvas.width - 1, Math.floor(gx * maskScaleX));
+        const mIdx = (my * mWidth + mx) * 4;
+        const mVal = Math.max(rawMaskData[mIdx], rawMaskData[mIdx + 1], rawMaskData[mIdx + 2]);
+
+        const idx = ry * roiW + rx;
+        maskWeights[idx] = mVal > 25 ? Math.min(1.0, mVal / 255) : 0;
+
+        const pIdx = idx * 4;
+        lum[idx] = 0.299 * roiData[pIdx] + 0.587 * roiData[pIdx + 1] + 0.114 * roiData[pIdx + 2];
+      }
     }
 
-    // 3. Suavizado gaussiano espacial 3x3 ligero para generar transición suave sin saltos de borde
-    const smoothedMask = new Float32Array(w * h);
-    const pad = 4;
-    const bbMinX = Math.max(1, minX - pad);
-    const bbMaxX = Math.min(w - 2, maxX + pad);
-    const bbMinY = Math.max(1, minY - pad);
-    const bbMaxY = Math.min(h - 2, maxY + pad);
-
-    for (let y = bbMinY; y <= bbMaxY; y++) {
-      for (let x = bbMinX; x <= bbMaxX; x++) {
-        const idx = y * w + x;
-        const center = maskWeights[idx];
-        if (center > 0 || maskWeights[idx - 1] > 0 || maskWeights[idx + 1] > 0 || maskWeights[idx - w] > 0 || maskWeights[idx + w] > 0) {
+    // Suavizado suave (feathering local <= 5px) en el perímetro de la máscara
+    const smoothedMask = new Float32Array(roiTotal);
+    for (let ry = 1; ry < roiH - 1; ry++) {
+      for (let rx = 1; rx < roiW - 1; rx++) {
+        const idx = ry * roiW + rx;
+        const c = maskWeights[idx];
+        if (c > 0 || maskWeights[idx - 1] > 0 || maskWeights[idx + 1] > 0 ||
+            maskWeights[idx - roiW] > 0 || maskWeights[idx + roiW] > 0) {
           smoothedMask[idx] = (
-            maskWeights[idx - w - 1] + 2 * maskWeights[idx - w] + maskWeights[idx - w + 1] +
-            2 * maskWeights[idx - 1] + 4 * center + 2 * maskWeights[idx + 1] +
-            maskWeights[idx + w - 1] + 2 * maskWeights[idx + w] + maskWeights[idx + w + 1]
+            maskWeights[idx - roiW - 1] + 2 * maskWeights[idx - roiW] + maskWeights[idx - roiW + 1] +
+            2 * maskWeights[idx - 1] + 4 * c + 2 * maskWeights[idx + 1] +
+            maskWeights[idx + roiW - 1] + 2 * maskWeights[idx + roiW] + maskWeights[idx + roiW + 1]
           ) / 16;
         }
       }
     }
 
-    // 4. Estimar superficie local de referencia del papel/fondo a partir del vecindario no enmascarado
-    const searchMargin = Math.max(25, Math.min(80, Math.round(Math.max(maxX - minX, maxY - minY) * 0.3)));
-    const sMinX = Math.max(0, minX - searchMargin);
-    const sMaxX = Math.min(w - 1, maxX + searchMargin);
-    const sMinY = Math.max(0, minY - searchMargin);
-    const sMaxY = Math.min(h - 1, maxY + searchMargin);
+    // -------------------------------------------------------------
+    // PASO 4: Detección de gradientes y magnitud de bordes
+    // -------------------------------------------------------------
+    const gradMag = new Float32Array(roiTotal);
 
-    const sWidth = Math.max(1, sMaxX - sMinX + 1);
-    const sHeight = Math.max(1, sMaxY - sMinY + 1);
+    for (let ry = 1; ry < roiH - 1; ry++) {
+      for (let rx = 1; rx < roiW - 1; rx++) {
+        const idx = ry * roiW + rx;
+        const gx = (lum[idx + 1] - lum[idx - 1]) * 0.5;
+        const gy = (lum[idx + roiW] - lum[idx - roiW]) * 0.5;
+        gradMag[idx] = Math.hypot(gx, gy);
+      }
+    }
 
-    // Rejilla de celdas locales para estimar la superficie suave
-    const gridCols = Math.max(4, Math.min(20, Math.ceil(sWidth / 28)));
-    const gridRows = Math.max(4, Math.min(20, Math.ceil(sHeight / 28)));
+    // -------------------------------------------------------------
+    // PASO 5: Muestreo de superficie limpia sobre cuadrícula 2D
+    // -------------------------------------------------------------
+    const gridCols = Math.max(4, Math.min(24, Math.ceil(roiW / 24)));
+    const gridRows = Math.max(4, Math.min(24, Math.ceil(roiH / 24)));
     const gridLum = new Float32Array(gridCols * gridRows);
+    const cellW = roiW / gridCols;
+    const cellH = roiH / gridRows;
 
-    const cellW = sWidth / gridCols;
-    const cellH = sHeight / gridRows;
-
-    const totalGlobalSamples: number[] = [];
+    const allCleanSamples: number[] = [];
 
     for (let gy = 0; gy < gridRows; gy++) {
-      const cy0 = Math.floor(sMinY + gy * cellH);
-      const cy1 = Math.floor(sMinY + (gy + 1) * cellH);
-      const searchY0 = Math.max(sMinY, cy0 - Math.floor(cellH * 0.5));
-      const searchY1 = Math.min(sMaxY, cy1 + Math.floor(cellH * 0.5));
+      const cy0 = Math.floor(gy * cellH);
+      const cy1 = Math.floor((gy + 1) * cellH);
+      const sY0 = Math.max(0, cy0 - Math.floor(cellH * 0.6));
+      const sY1 = Math.min(roiH - 1, cy1 + Math.floor(cellH * 0.6));
 
       for (let gx = 0; gx < gridCols; gx++) {
-        const cx0 = Math.floor(sMinX + gx * cellW);
-        const cx1 = Math.floor(sMinX + (gx + 1) * cellW);
-        const searchX0 = Math.max(sMinX, cx0 - Math.floor(cellW * 0.5));
-        const searchX1 = Math.min(sMaxX, cx1 + Math.floor(cellW * 0.5));
+        const cx0 = Math.floor(gx * cellW);
+        const cx1 = Math.floor((gx + 1) * cellW);
+        const sX0 = Math.max(0, cx0 - Math.floor(cellW * 0.6));
+        const sX1 = Math.min(roiW - 1, cx1 + Math.floor(cellW * 0.6));
 
         const cellSamples: number[] = [];
-        const step = Math.max(1, Math.floor(Math.sqrt((searchX1 - searchX0) * (searchY1 - searchY0)) / 15));
+        const step = Math.max(1, Math.floor(Math.sqrt((sX1 - sX0) * (sY1 - sY0)) / 14));
 
-        for (let y = searchY0; y <= searchY1; y += step) {
-          for (let x = searchX0; x <= searchX1; x += step) {
-            const idx = y * w + x;
-            // Muestrear estrictamente fuera de la máscara
+        for (let y = sY0; y <= sY1; y += step) {
+          for (let x = sX0; x <= sX1; x += step) {
+            const idx = y * roiW + x;
+            // Solo píxeles no enmascarados y sin bordes de tinta
             if (maskWeights[idx] === 0 && smoothedMask[idx] < 0.01) {
-              const lum = lumMap[idx];
-              // Descartar oscuridad extrema
-              if (lum >= 30) {
-                cellSamples.push(lum);
+              const lVal = lum[idx];
+              const gVal = gradMag[idx];
+              if (lVal >= 30 && gVal < 45) {
+                cellSamples.push(lVal);
               }
             }
           }
         }
 
+        const gIdx = gy * gridCols + gx;
         if (cellSamples.length >= 3) {
           cellSamples.sort((a, b) => a - b);
-          // Percentil 75-80 para capturar el fondo limpio sin sesgo por tinta
+          // 75º percentil para capturar la superficie base del papel/documento
           const pIdx = Math.min(cellSamples.length - 1, Math.floor(cellSamples.length * 0.75));
-          gridLum[gy * gridCols + gx] = cellSamples[pIdx];
-          totalGlobalSamples.push(cellSamples[pIdx]);
+          gridLum[gIdx] = cellSamples[pIdx];
+          allCleanSamples.push(cellSamples[pIdx]);
         } else {
-          gridLum[gy * gridCols + gx] = -1; // Marcador de celda para interpolar de vecinos
+          gridLum[gIdx] = -1; // Marcador de celda para interpolar
         }
       }
     }
 
-    // Referencia global de respaldo
+    // Referencia de respaldo global dentro del ROI
     let fallbackRef = 220;
-    if (totalGlobalSamples.length > 0) {
-      totalGlobalSamples.sort((a, b) => a - b);
-      fallbackRef = totalGlobalSamples[Math.floor(totalGlobalSamples.length * 0.75)];
+    if (allCleanSamples.length > 0) {
+      allCleanSamples.sort((a, b) => a - b);
+      fallbackRef = allCleanSamples[Math.floor(allCleanSamples.length * 0.75)];
     }
 
-    // Rellenar celdas sin muestras suficientes buscando la celda válida más cercana
+    // Rellenar celdas sin suficientes muestras mediante interpolación ponderada por distancia
     for (let gy = 0; gy < gridRows; gy++) {
       for (let gx = 0; gx < gridCols; gx++) {
         const gIdx = gy * gridCols + gx;
         if (gridLum[gIdx] < 0) {
-          let nearestVal = fallbackRef;
-          let minDist = Infinity;
+          let sumVal = 0;
+          let sumWeight = 0;
           for (let ngy = 0; ngy < gridRows; ngy++) {
             for (let ngx = 0; ngx < gridCols; ngx++) {
               const nIdx = ngy * gridCols + ngx;
               if (gridLum[nIdx] >= 0) {
                 const dist = Math.hypot(gy - ngy, gx - ngx);
-                if (dist < minDist) {
-                  minDist = dist;
-                  nearestVal = gridLum[nIdx];
-                }
+                const weight = 1.0 / Math.pow(Math.max(1.0, dist), 2);
+                sumVal += gridLum[nIdx] * weight;
+                sumWeight += weight;
               }
             }
           }
-          gridLum[gIdx] = nearestVal;
+          gridLum[gIdx] = sumWeight > 0 ? sumVal / sumWeight : fallbackRef;
         }
       }
     }
 
-    // Interpolación bilineal para superficie local continua L_ref(x, y)
-    const getLocalRefLum = (x: number, y: number): number => {
-      const gx = Math.max(0, Math.min(gridCols - 1, ((x - sMinX) / sWidth) * gridCols - 0.5));
-      const gy = Math.max(0, Math.min(gridRows - 1, ((y - sMinY) / sHeight) * gridRows - 0.5));
+    // Función de interpolación bilineal continua para la superficie de referencia L_ref(rx, ry)
+    const getRefLum = (rx: number, ry: number): number => {
+      const gx = Math.max(0, Math.min(gridCols - 1, (rx / roiW) * gridCols - 0.5));
+      const gy = Math.max(0, Math.min(gridRows - 1, (ry / roiH) * gridRows - 0.5));
 
       const gx0 = Math.floor(gx);
       const gy0 = Math.floor(gy);
@@ -1406,355 +1450,66 @@ export async function applyLocalizedMaskedWrinkleCorrection(canvas: HTMLCanvasEl
       return top * (1 - fy) + bottom * fy;
     };
 
-    // 5. Aplicar corrección de iluminación y compensación de sombra de baja frecuencia
-    for (let y = bbMinY; y <= bbMaxY; y++) {
-      for (let x = bbMinX; x <= bbMaxX; x++) {
-        const idx = y * w + x;
+    // -------------------------------------------------------------
+    // PASO 6, 7 y 8: Reconstrucción directa de superficie y corrección en un solo paso
+    // -------------------------------------------------------------
+    for (let ry = 0; ry < roiH; ry++) {
+      for (let rx = 0; rx < roiW; rx++) {
+        const idx = ry * roiW + rx;
         const mWeight = smoothedMask[idx];
 
         if (mWeight > 0.005) {
-          const currentLum = lumMap[idx];
-          const refPaperLum = Math.max(30, getLocalRefLum(x, y));
+          const currentLum = lum[idx];
+          const refLum = Math.max(25, getRefLum(rx, ry));
 
-          // Déficit de sombra relativo al fondo local limpio [0..1]
-          const shadowDeficit = refPaperLum > currentLum
-            ? (refPaperLum - currentLum) / Math.max(1.0, refPaperLum)
-            : 0;
+          // Perturbación directa del pliegue relativa a la superficie de referencia
+          // disturbance < 0: valle de sombra oscura
+          // disturbance > 0: cresta de brillo especular
+          const disturbance = currentLum - refLum;
 
-          if (shadowDeficit > 0.005) {
-            // Protección de texto: discriminar tinta oscura vs sombra continua de pliegue
-            let textProtection = 0;
-            if (currentLum < refPaperLum * 0.50) {
-              const darkness = Math.max(0, Math.min(1.0, (refPaperLum * 0.50 - currentLum) / (refPaperLum * 0.35)));
+          // Protección selectiva de texto: discriminar tinta oscura de trazo fino vs sombra de pliegue
+          let textProtection = 0;
+          if (currentLum < refLum * 0.45) {
+            const darkness = Math.max(0, Math.min(1.0, (refLum * 0.45 - currentLum) / (refLum * 0.25)));
+            const edgeFactor = Math.min(1.0, gradMag[idx] / 40);
+            textProtection = Math.min(1.0, darkness * (0.35 + 0.65 * edgeFactor));
+          }
 
-              // Magnitud de gradiente local
-              const gradX = Math.abs(lumMap[idx + 1] - lumMap[idx - 1]);
-              const gradY = Math.abs(lumMap[idx + w] - lumMap[idx - w]);
-              const gradMag = gradX + gradY;
-              const edgeFactor = Math.min(1.0, gradMag / 50);
+          // Ponderación de reparación efectiva única
+          const effectiveRepairWeight = mWeight * (1.0 - textProtection);
 
-              textProtection = darkness * (0.3 + 0.7 * edgeFactor);
-            }
+          if (effectiveRepairWeight > 0.005) {
+            // Reconstrucción directa de luminancia: elimina la perturbación del pliegue
+            // hacia la superficie de referencia suave, ponderada directamente por el peso efectivo
+            const targetLum = currentLum - disturbance * effectiveRepairWeight;
+            const clampedLum = Math.max(0, Math.min(255, targetLum));
 
-            // Ponderación espacial efectiva con desvanecimiento en el borde
-            const effectiveWeight = mWeight * (1.0 - 0.75 * textProtection);
+            // Ganancia multiplicativa uniforme para conservar exactamente la cromaticidad R:G:B
+            const gain = clampedLum / Math.max(1.0, currentLum);
+            const safeGain = Math.min(2.5, Math.max(0.4, gain));
 
-            if (effectiveWeight > 0.005) {
-              // Compensación proporcional que relumina la sombra hacia el fondo de referencia
-              const compensationRatio = Math.min(0.95, 0.40 + shadowDeficit * 0.80);
-              const liftAmount = (refPaperLum - currentLum) * compensationRatio * effectiveWeight;
-              const targetLum = Math.min(refPaperLum, currentLum + liftAmount);
-
-              // Ganancia multiplicativa acotada para preservar proporciones cromáticas
-              const gain = targetLum / Math.max(1.0, currentLum);
-              const boundedGain = Math.min(1.50, Math.max(1.0, gain));
-
-              const pIdx = idx * 4;
-              data[pIdx] = Math.min(255, Math.round(data[pIdx] * boundedGain));
-              data[pIdx + 1] = Math.min(255, Math.round(data[pIdx + 1] * boundedGain));
-              data[pIdx + 2] = Math.min(255, Math.round(data[pIdx + 2] * boundedGain));
-            }
+            const pIdx = idx * 4;
+            roiData[pIdx] = Math.max(0, Math.min(255, Math.round(roiData[pIdx] * safeGain)));
+            roiData[pIdx + 1] = Math.max(0, Math.min(255, Math.round(roiData[pIdx + 1] * safeGain)));
+            roiData[pIdx + 2] = Math.max(0, Math.min(255, Math.round(roiData[pIdx + 2] * safeGain)));
           }
         }
       }
     }
 
-    ctx.putImageData(originalImageData, 0, 0);
+    // -------------------------------------------------------------
+    // PASO 9: Escribir la región ROI corregida de vuelta al lienzo
+    // -------------------------------------------------------------
+    ctx.putImageData(roiImageData, roiX0, roiY0);
 
-    // 6. Validar que la salida sea válida y segura
+    // -------------------------------------------------------------
+    // PASO 10: Validar la salida contra anomalías o colapsos numéricos
+    // -------------------------------------------------------------
     validateCanvasOutput(canvas, backupData);
   } catch (err) {
     console.error('Error en corrección localizada de arrugas:', err);
     ctx.putImageData(backupData, 0, 0);
   }
-}
-
-/**
- * Modo A (Automático): Corrección localizada y conservadora de sombras de arrugas/pliegues.
- * - Estima el campo de iluminación de baja frecuencia.
- * - Detecta desviaciones continuas de sombra correspondientes a pliegues.
- * - Suprime la corrección sobre trazos de texto de alta frecuencia.
- * - Aplica una corrección sutil (máx 10-18%) en la luminancia preservando el matiz y el resto del documento.
- */
-export async function applyConservativeWrinkleShadowCorrection(canvas: HTMLCanvasElement) {
-  const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  if (!ctx || canvas.width === 0 || canvas.height === 0) return;
-
-  const w = canvas.width;
-  const h = canvas.height;
-  const originalImageData = ctx.getImageData(0, 0, w, h);
-  const data = originalImageData.data;
-
-  // Respaldo de seguridad en caso de que no haya artefactos o falle la validación
-  const backupCanvas = document.createElement('canvas');
-  backupCanvas.width = w;
-  backupCanvas.height = h;
-  const backupCtx = backupCanvas.getContext('2d');
-  if (backupCtx) backupCtx.putImageData(originalImageData, 0, 0);
-
-  try {
-    // 1. Estimar fondo / campo de iluminación a baja frecuencia
-    const bgCanvas = document.createElement('canvas');
-    const bgW = Math.max(48, Math.min(120, Math.floor(w / 16)));
-    const bgH = Math.max(36, Math.round((bgW * h) / w));
-    bgCanvas.width = bgW;
-    bgCanvas.height = bgH;
-    const bgCtx = bgCanvas.getContext('2d', { willReadFrequently: true });
-    if (!bgCtx) return;
-
-    bgCtx.drawImage(canvas, 0, 0, bgW, bgH);
-    bgCtx.filter = 'blur(4px)';
-    bgCtx.drawImage(bgCanvas, 0, 0);
-    bgCtx.filter = 'none';
-
-    const bgData = bgCtx.getImageData(0, 0, bgW, bgH).data;
-
-    // 2. Extraer mapa de luminancia de la imagen completa
-    const lumMap = new Float32Array(w * h);
-    for (let i = 0; i < data.length; i += 4) {
-      lumMap[i / 4] = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-    }
-
-    // 3. Evaluar desviaciones de sombra y correlación direccional de pliegues
-    const confidenceMap = new Float32Array(w * h);
-    let totalConfidence = 0;
-    const sampleStep = 2; // Muestreo optimizado
-
-    for (let y = 2; y < h - 2; y += sampleStep) {
-      const bgY = Math.min(bgH - 1, Math.floor((y / h) * bgH));
-      for (let x = 2; x < w - 2; x += sampleStep) {
-        const idx = y * w + x;
-        const bgX = Math.min(bgW - 1, Math.floor((x / w) * bgW));
-        const bgIdx = (bgY * bgW + bgX) * 4;
-
-        const bgLum = 0.299 * bgData[bgIdx] + 0.587 * bgData[bgIdx + 1] + 0.114 * bgData[bgIdx + 2];
-        const currentLum = lumMap[idx];
-
-        // Desviación local respecto al fondo suave
-        const dev = bgLum > 30 ? (bgLum - currentLum) / bgLum : 0;
-
-        // Solo sombras suaves a medias (no texto de alto contraste que suele tener dev > 0.6)
-        if (dev > 0.05 && dev < 0.38) {
-          // Gradiente local para detectar bordes afilados de texto y suprimirlos
-          const gradX = Math.abs(lumMap[idx + 1] - lumMap[idx - 1]);
-          const gradY = Math.abs(lumMap[idx + w] - lumMap[idx - w]);
-          const gradMag = gradX + gradY;
-
-          // Si el gradiente es muy alto, es texto o línea nítida -> suprimir corrección
-          if (gradMag < 40) {
-            // Detector de estructura continua de pliegue (valle direccional suave)
-            const hSpan = Math.abs(lumMap[idx - 2] + lumMap[idx + 2] - 2 * currentLum);
-            const vSpan = Math.abs(lumMap[idx - 2 * w] + lumMap[idx + 2 * w] - 2 * currentLum);
-            const creaseStrength = Math.min(1.0, (hSpan + vSpan) / 25);
-
-            const conf = Math.min(1.0, (dev / 0.30) * (0.4 + 0.6 * creaseStrength));
-            confidenceMap[idx] = conf;
-            totalConfidence += conf;
-          }
-        }
-      }
-    }
-
-    // 4. Si la señal global de arruga/sombra es insignificante, devolver la imagen intacta
-    const thresholdConfidence = (w * h) / (sampleStep * sampleStep) * 0.0015;
-    if (totalConfidence < thresholdConfidence) {
-      // Sin artefactos detectables: mantener imagen original intacta
-      return;
-    }
-
-    // 5. Aplicar corrección de luminancia suave y conservadora (máx 15-18% en zonas detectadas)
-    for (let y = 0; y < h; y++) {
-      const bgY = Math.min(bgH - 1, Math.floor((y / h) * bgH));
-      for (let x = 0; x < w; x++) {
-        const idx = y * w + x;
-        const conf = confidenceMap[idx];
-
-        if (conf > 0.02) {
-          const bgX = Math.min(bgW - 1, Math.floor((x / w) * bgW));
-          const bgIdx = (bgY * bgW + bgX) * 4;
-          const bgLum = 0.299 * bgData[bgIdx] + 0.587 * bgData[bgIdx + 1] + 0.114 * bgData[bgIdx + 2];
-          const currentLum = lumMap[idx];
-          const dev = bgLum > 30 ? Math.max(0, (bgLum - currentLum) / bgLum) : 0;
-
-          // Ganancia multiplicativa uniforme para los tres canales RGB (preserva matiz exacto)
-          const gain = 1.0 + conf * Math.min(0.18, dev * 0.7);
-
-          const pIdx = idx * 4;
-          data[pIdx] = Math.min(255, Math.round(data[pIdx] * gain));
-          data[pIdx + 1] = Math.min(255, Math.round(data[pIdx + 1] * gain));
-          data[pIdx + 2] = Math.min(255, Math.round(data[pIdx + 2] * gain));
-        }
-      }
-    }
-
-    ctx.putImageData(originalImageData, 0, 0);
-
-    // Validación de seguridad para prevenir pantallas negras
-    validateCanvasOutput(canvas, originalImageData);
-  } catch (err) {
-    console.error('Error en corrección automática de arrugas:', err);
-    if (backupCtx) {
-      ctx.drawImage(backupCanvas, 0, 0);
-    }
-  }
-}
-
-/**
- * Modo B (Manual): Inpainting localizado con OpenCV.js.
- * Utiliza cv.inpaint() con cv.INPAINT_TELEA y un radio pequeño de 2px,
- * con dilatación elíptica suave de 3x3, limitando la restauración
- * estrictamente al área seleccionada por el usuario.
- */
-async function removeWrinklesWithInpainting(canvas: HTMLCanvasElement, maskCanvas: HTMLCanvasElement) {
-  const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  if (!ctx || canvas.width === 0 || canvas.height === 0) return;
-
-  const w = canvas.width;
-  const h = canvas.height;
-  const backupImageData = ctx.getImageData(0, 0, w, h);
-
-  // Intentar cargar OpenCV.js si no está presente
-  if (typeof (window as any).cv === 'undefined') {
-    try {
-      await loadOpenCV();
-    } catch {
-      console.warn('OpenCV.js no disponible para inpainting manual. Aplicando corrección conservadora.');
-      await applyConservativeWrinkleShadowCorrection(canvas);
-      return;
-    }
-  }
-
-  const cv = (window as any).cv;
-  if (!cv || !cv.Mat) {
-    console.warn('OpenCV.js no inicializado. Aplicando corrección conservadora.');
-    await applyConservativeWrinkleShadowCorrection(canvas);
-    return;
-  }
-
-  // Punteros a matrices para liberación segura en bloque finally
-  let src: any = null;
-  let imgRGB: any = null;
-  let mask: any = null;
-  let maskGray: any = null;
-  let maskBinary: any = null;
-  let kernel: any = null;
-  let maskDilated: any = null;
-  let dst: any = null;
-  let dstRGBA: any = null;
-
-  try {
-    // 1. Leer imagen original
-    src = cv.imread(canvas);
-    imgRGB = new cv.Mat();
-    cv.cvtColor(src, imgRGB, cv.COLOR_RGBA2RGB);
-
-    // 2. Leer máscara manual del usuario
-    mask = cv.imread(maskCanvas);
-    maskGray = new cv.Mat();
-    cv.cvtColor(mask, maskGray, cv.COLOR_RGBA2GRAY);
-
-    // 3. Binarizar máscara con umbral seguro
-    maskBinary = new cv.Mat();
-    cv.threshold(maskGray, maskBinary, 127, 255, cv.THRESH_BINARY);
-
-    // Si la máscara no tiene píxeles marcados, salir sin modificar
-    const nonZero = cv.countNonZero(maskBinary);
-    if (nonZero === 0) {
-      return;
-    }
-
-    // 4. Dilatación suave de 3x3 con elemento elíptico (en lugar de 5x5 rectangular agresivo)
-    kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(3, 3));
-    maskDilated = new cv.Mat();
-    cv.dilate(maskBinary, maskDilated, kernel);
-
-    // 5. Aplicar inpainting localizado Telea con radio pequeño (2px)
-    dst = new cv.Mat();
-    cv.inpaint(imgRGB, maskDilated, dst, 2, cv.INPAINT_TELEA);
-
-    // 6. Convertir resultado a RGBA y renderizar en canvas
-    dstRGBA = new cv.Mat();
-    cv.cvtColor(dst, dstRGBA, cv.COLOR_RGB2RGBA);
-    cv.imshow(canvas, dstRGBA);
-
-    // 7. Validar que la salida no sea negra o corrupta
-    validateCanvasOutput(canvas, backupImageData);
-  } catch (error) {
-    console.error('Error durante inpainting con OpenCV:', error);
-    // Restaurar imagen de respaldo en caso de fallo
-    ctx.putImageData(backupImageData, 0, 0);
-  } finally {
-    // Liberación exhaustiva de memoria WebAssembly
-    try {
-      if (src && !src.isDeleted()) src.delete();
-      if (imgRGB && !imgRGB.isDeleted()) imgRGB.delete();
-      if (mask && !mask.isDeleted()) mask.delete();
-      if (maskGray && !maskGray.isDeleted()) maskGray.delete();
-      if (maskBinary && !maskBinary.isDeleted()) maskBinary.delete();
-      if (kernel && !kernel.isDeleted()) kernel.delete();
-      if (maskDilated && !maskDilated.isDeleted()) maskDilated.delete();
-      if (dst && !dst.isDeleted()) dst.delete();
-      if (dstRGBA && !dstRGBA.isDeleted()) dstRGBA.delete();
-    } catch (cleanupErr) {
-      console.warn('Error liberando matrices OpenCV:', cleanupErr);
-    }
-  }
-}
-
-/**
- * Carga OpenCV.js desde CDN de manera no bloqueante y segura
- */
-function loadOpenCV(): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (typeof (window as any).cv !== 'undefined' && (window as any).cv.Mat) {
-      resolve();
-      return;
-    }
-
-    // Comprobar si ya existe el script insertado
-    const existingScript = document.querySelector('script[src*="opencv.js"]');
-    if (existingScript) {
-      let attempts = 0;
-      const interval = setInterval(() => {
-        attempts++;
-        if (typeof (window as any).cv !== 'undefined' && (window as any).cv.Mat) {
-          clearInterval(interval);
-          resolve();
-        } else if (attempts > 50) {
-          clearInterval(interval);
-          reject(new Error('OpenCV.js timeout de inicialización'));
-        }
-      }, 100);
-      return;
-    }
-
-    const script = document.createElement('script');
-    script.src = 'https://docs.opencv.org/4.x/opencv.js';
-    script.async = true;
-
-    const timeout = setTimeout(() => {
-      reject(new Error('Timeout cargando OpenCV.js'));
-    }, 8000);
-
-    script.onload = () => {
-      const checkCV = () => {
-        if (typeof (window as any).cv !== 'undefined' && (window as any).cv.Mat) {
-          clearTimeout(timeout);
-          resolve();
-        } else {
-          setTimeout(checkCV, 100);
-        }
-      };
-      checkCV();
-    };
-
-    script.onerror = () => {
-      clearTimeout(timeout);
-      reject(new Error('Error cargando OpenCV.js desde CDN'));
-    };
-
-    document.head.appendChild(script);
-  });
 }
 
 /**

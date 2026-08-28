@@ -4,11 +4,10 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Camera, Sparkles, HelpCircle, FileText, Wrench, Zap } from 'lucide-react';
+import { Camera, Sparkles, HelpCircle, FileText, Wrench, Zap, Home } from 'lucide-react';
 import { DocumentItem } from '../types';
 import { getDocuments, deleteDocument, duplicateDocument, renameDocument } from '../services/documentStore';
 import { generatePDF } from '../services/pdfGenerator';
-import SearchBar from '../components/home/SearchBar';
 import DocumentCard from '../components/home/DocumentCard';
 import EmptyState from '../components/home/EmptyState';
 import ToolsTab from '../components/home/ToolsTab';
@@ -20,7 +19,6 @@ interface HomePageProps {
 
 export default function HomePage({ onStartNewScan, onEditDocument }: HomePageProps) {
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
-  const [searchQuery, setSearchQuery] = useState('');
   const [showHelp, setShowHelp] = useState(false);
   const [activeTab, setActiveTab] = useState<'documents' | 'tools'>('documents');
 
@@ -56,16 +54,22 @@ export default function HomePage({ onStartNewScan, onEditDocument }: HomePagePro
     }
   };
 
-  // Filtrar documentos según búsqueda
-  const filteredDocs = documents.filter((doc) =>
-    doc.name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
   return (
     <div className="flex flex-col h-full bg-[#09364D] text-white overflow-hidden relative">
       {/* Header */}
       <header className="p-5 bg-[#1C1C1E] border-b border-[#2C2C2E] flex items-center justify-between z-10 shrink-0">
         <div className="flex items-center gap-2.5">
+          {activeTab === 'tools' && (
+            <button
+              id="btn-tools-home"
+              onClick={() => setActiveTab('documents')}
+              className="p-2 -ml-1 text-gray-400 hover:text-white hover:bg-[#2C2C2E] rounded-xl transition-colors cursor-pointer"
+              title="Inicio"
+              aria-label="Ir a Inicio"
+            >
+              <Home size={18} />
+            </button>
+          )}
           <div className="w-9 h-9 rounded-xl bg-[#2979FF] flex items-center justify-center text-white shadow-md shadow-[#2979FF]/20">
             {activeTab === 'documents' ? (
               <Camera size={18} strokeWidth={2.5} />
@@ -116,32 +120,19 @@ export default function HomePage({ onStartNewScan, onEditDocument }: HomePagePro
       <main className="flex-1 overflow-y-auto p-5 pb-24">
         {activeTab === 'documents' ? (
           <>
-            {/* Barra de búsqueda */}
-            {documents.length > 0 && (
-              <div className="mb-6">
-                <SearchBar value={searchQuery} onChange={setSearchQuery} />
-              </div>
-            )}
-
             {/* Listado o Empty State */}
-            {filteredDocs.length === 0 ? (
-              searchQuery ? (
-                <div className="text-center py-16 text-gray-400">
-                  <p className="text-sm">No se encontraron documentos con "{searchQuery}"</p>
-                </div>
-              ) : (
-                <EmptyState onScanClick={onStartNewScan} />
-              )
+            {documents.length === 0 ? (
+              <EmptyState onScanClick={onStartNewScan} />
             ) : (
               <div>
                 <div className="flex items-center justify-between mb-4 px-1 shrink-0">
                   <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">
-                    Documentos Recientes ({filteredDocs.length})
+                    Documentos Recientes ({documents.length})
                   </span>
                 </div>
                 
                 <div className="grid grid-cols-2 gap-4">
-                  {filteredDocs.map((doc) => (
+                  {documents.map((doc) => (
                     <DocumentCard
                       key={doc.id}
                       document={doc}
@@ -185,7 +176,7 @@ export default function HomePage({ onStartNewScan, onEditDocument }: HomePagePro
       </div>
 
       {/* Botón Flotante de Acción (FAB) Unificado - Solo cuando hay documentos listados */}
-      {activeTab === 'documents' && filteredDocs.length > 0 && (
+      {activeTab === 'documents' && documents.length > 0 && (
         <button
           id="fab-scan-btn"
           onClick={onStartNewScan}

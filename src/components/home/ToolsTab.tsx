@@ -39,7 +39,7 @@ interface ToolsTabProps {
   onStartNewScan: () => void;
 }
 
-type ActiveToolType = 'none' | 'recortar' | 'borrar' | 'combinar' | 'mejorar' | 'correccion_angulo' | 'herramientas_edicion';
+type ActiveToolType = 'none' | 'recortar' | 'borrar' | 'combinar' | 'mejorar' | 'correccion_angulo';
 
 export default function ToolsTab({ onStartNewScan }: ToolsTabProps) {
   const [activeTool, setActiveTool] = useState<ActiveToolType>('none');
@@ -466,26 +466,6 @@ export default function ToolsTab({ onStartNewScan }: ToolsTabProps) {
               </div>
               <ChevronRight size={18} className="text-gray-500 group-hover:text-white transition-colors" />
             </button>
-
-            {/* Opción Restaurador de Documentos (Real) */}
-            <button
-              onClick={() => {
-                setActiveTool('herramientas_edicion');
-                resetToolStates();
-              }}
-              className="flex items-center gap-4 p-4 rounded-xl border border-[#2C2C2E] bg-[#1C1C1E] hover:bg-[#2C2C2E]/60 hover:border-[#2979FF]/40 transition-all text-left group"
-            >
-              <div className="p-3 rounded-xl bg-[#4ECDC4]/10 text-[#4ECDC4] group-hover:scale-105 transition-transform">
-                <Sparkles size={24} />
-              </div>
-              <div className="flex-1">
-                <h4 className="text-sm font-bold text-white">Quitar Arrugas y Perforaciones</h4>
-                <p className="text-[11px] text-gray-400 mt-0.5">
-                  Elimina marcas de pliegues, dobleces y hoyos de carpeta sustituyéndolos por papel blanco.
-                </p>
-              </div>
-              <ChevronRight size={18} className="text-gray-500 group-hover:text-white transition-colors" />
-            </button>
           </div>
         </>
       )}
@@ -513,7 +493,6 @@ export default function ToolsTab({ onStartNewScan }: ToolsTabProps) {
                 {activeTool === 'combinar' && 'Combinar Archivos'}
                 {activeTool === 'mejorar' && 'Mejorar Claridad'}
                 {activeTool === 'correccion_angulo' && 'Corrección de Ángulo'}
-                {activeTool === 'herramientas_edicion' && 'Herramientas de Edición'}
               </h2>
             </div>
           </div>

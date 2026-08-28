@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useRef, useEffect } from 'react';
-import { MoreVertical, Calendar, FileText, Trash2, Edit2, Copy, Download } from 'lucide-react';
+import { MoreVertical, Calendar, FileText, Trash2, Edit2, Copy, Download, AlertTriangle } from 'lucide-react';
 import { DocumentItem } from '../../types';
 
 interface DocumentCardProps {
@@ -26,6 +26,9 @@ export default function DocumentCard({
   onExport,
 }: DocumentCardProps) {
   const [showMenu, setShowMenu] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showRenameModal, setShowRenameModal] = useState(false);
+  const [renameValue, setRenameValue] = useState(doc.name);
   const menuRef = useRef<HTMLDivElement>(null);
 
   // Cerrar menú si se hace clic afuera
@@ -42,6 +45,14 @@ export default function DocumentCard({
       window.removeEventListener('mousedown', handleClickOutside);
     };
   }, [showMenu]);
+
+  const handleSaveRename = () => {
+    const trimmed = renameValue.trim();
+    if (trimmed) {
+      onRename(doc.id, trimmed);
+    }
+    setShowRenameModal(false);
+  };
 
   const formattedDate = new Date(doc.createdAt).toLocaleDateString('es-ES', {
     day: 'numeric',
@@ -122,12 +133,10 @@ export default function DocumentCard({
                   onClick={(e) => {
                     e.stopPropagation();
                     setShowMenu(false);
-                    const newName = prompt('Renombrar documento:', doc.name);
-                    if (newName && newName.trim()) {
-                      onRename(doc.id, newName);
-                    }
+                    setRenameValue(doc.name);
+                    setShowRenameModal(true);
                   }}
-                  className="w-full px-3.5 py-2 text-left text-xs text-gray-200 hover:bg-[#1C1C1E] hover:text-white flex items-center gap-2"
+                  className="w-full px-3.5 py-2 text-left text-xs text-gray-200 hover:bg-[#1C1C1E] hover:text-white flex items-center gap-2 cursor-pointer"
                 >
                   <Edit2 size={13} className="text-gray-400" />
                   Renombrar
@@ -166,11 +175,9 @@ export default function DocumentCard({
                   onClick={(e) => {
                     e.stopPropagation();
                     setShowMenu(false);
-                    if (confirm(`¿Estás seguro de que quieres eliminar "${doc.name}"?`)) {
-                      onDelete(doc.id);
-                    }
+                    setShowDeleteConfirm(true);
                   }}
-                  className="w-full px-3.5 py-2 text-left text-xs text-red-400 hover:bg-red-500/10 hover:text-red-300 flex items-center gap-2"
+                  className="w-full px-3.5 py-2 text-left text-xs text-red-400 hover:bg-red-500/10 hover:text-red-300 flex items-center gap-2 cursor-pointer"
                 >
                   <Trash2 size={13} />
                   Eliminar
@@ -180,6 +187,117 @@ export default function DocumentCard({
           </div>
         </div>
       </div>
+
+      {/* Modal de Confirmación de Eliminación */}
+      {showDeleteConfirm && (
+        <div
+          id={`delete-modal-${doc.id}`}
+          onClick={(e) => e.stopPropagation()}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in"
+        >
+          <div
+            className="bg-[#1C1C1E] border border-[#2C2C2E] rounded-2xl p-5 max-w-xs w-full shadow-2xl flex flex-col gap-4 text-center"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-11 h-11 rounded-full bg-red-500/10 border border-red-500/20 text-red-400 flex items-center justify-center mx-auto">
+              <Trash2 size={20} />
+            </div>
+
+            <div>
+              <h3 className="text-sm font-bold text-white mb-1.5">¿Eliminar documento?</h3>
+              <p className="text-xs text-gray-400 leading-relaxed">
+                ¿Estás seguro de que quieres eliminar <span className="text-white font-medium">"{doc.name}"</span>? Esta acción no se puede deshacer.
+              </p>
+            </div>
+
+            <div className="flex gap-2.5 mt-1">
+              <button
+                id={`btn-cancel-delete-${doc.id}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowDeleteConfirm(false);
+                }}
+                className="flex-1 px-3 py-2 bg-[#2C2C2E] hover:bg-[#3C3C3E] text-gray-300 hover:text-white rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                id={`btn-confirm-delete-${doc.id}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowDeleteConfirm(false);
+                  onDelete(doc.id);
+                }}
+                className="flex-1 px-3 py-2 bg-red-500 hover:bg-red-600 text-white rounded-xl text-xs font-semibold shadow-lg shadow-red-500/20 transition-all active:scale-95 cursor-pointer"
+              >
+                Eliminar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Renombrar Documento */}
+      {showRenameModal && (
+        <div
+          id={`rename-modal-${doc.id}`}
+          onClick={(e) => e.stopPropagation()}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in"
+        >
+          <div
+            className="bg-[#1C1C1E] border border-[#2C2C2E] rounded-2xl p-5 max-w-xs w-full shadow-2xl flex flex-col gap-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div>
+              <h3 className="text-sm font-bold text-white mb-1">Renombrar documento</h3>
+              <p className="text-xs text-gray-400">Ingresa el nuevo nombre para este documento:</p>
+            </div>
+
+            <input
+              id={`input-rename-${doc.id}`}
+              type="text"
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleSaveRename();
+                } else if (e.key === 'Escape') {
+                  e.preventDefault();
+                  setShowRenameModal(false);
+                }
+              }}
+              autoFocus
+              className="w-full bg-[#2C2C2E] border border-[#3C3C3E] focus:border-[#2979FF] focus:outline-none rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-gray-500 transition-colors"
+              placeholder="Nombre del documento"
+            />
+
+            <div className="flex gap-2.5">
+              <button
+                id={`btn-cancel-rename-${doc.id}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowRenameModal(false);
+                }}
+                className="flex-1 px-3 py-2 bg-[#2C2C2E] hover:bg-[#3C3C3E] text-gray-300 hover:text-white rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                id={`btn-confirm-rename-${doc.id}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleSaveRename();
+                }}
+                disabled={!renameValue.trim()}
+                className="flex-1 px-3 py-2 bg-[#2979FF] hover:bg-[#1E6BE6] disabled:opacity-40 disabled:hover:bg-[#2979FF] text-white rounded-xl text-xs font-semibold shadow-lg shadow-[#2979FF]/20 transition-all active:scale-95 cursor-pointer"
+              >
+                Guardar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
