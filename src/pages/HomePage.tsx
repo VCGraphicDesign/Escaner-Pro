@@ -79,9 +79,9 @@ export default function HomePage({ onStartNewScan, onEditDocument }: HomePagePro
           </div>
           <div>
             <h1 className="text-base font-bold tracking-tight text-white leading-tight">
-              {activeTab === 'documents' ? 'Escáner Pro' : 'Herramientas'}
+              {activeTab === 'documents' ? 'VCL Escaner Pro' : 'Herramientas'}
             </h1>
-            <p className="text-[10px] text-gray-500 font-medium">Procesamiento Local Offline</p>
+            <p className="text-[10px] text-gray-500 font-medium">Escanea y edita tus documentos</p>
           </div>
         </div>
         

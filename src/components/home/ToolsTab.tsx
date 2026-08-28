@@ -20,12 +20,7 @@ import {
   ChevronRight,
   Sparkles,
   FileText,
-  Layers,
-  ArrowUp,
-  ArrowDown,
-  Trash2,
   Sliders,
-  Plus,
   RotateCcw,
   Edit,
   RefreshCw
@@ -39,7 +34,7 @@ interface ToolsTabProps {
   onStartNewScan: () => void;
 }
 
-type ActiveToolType = 'none' | 'recortar' | 'borrar' | 'combinar' | 'mejorar' | 'correccion_angulo';
+type ActiveToolType = 'none' | 'recortar' | 'borrar' | 'mejorar' | 'correccion_angulo' | 'herramientas_edicion';
 
 export default function ToolsTab({ onStartNewScan }: ToolsTabProps) {
   const [activeTool, setActiveTool] = useState<ActiveToolType>('none');
@@ -68,10 +63,6 @@ export default function ToolsTab({ onStartNewScan }: ToolsTabProps) {
   const lastPos = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const [editedResult, setEditedResult] = useState<string | null>(null);
 
-  // --- ESTADOS PARA COMBINAR ARCHIVOS ---
-  const [selectedDocsToCombine, setSelectedDocsToCombine] = useState<DocumentItem[]>([]);
-  const [combinedDocName, setCombinedDocName] = useState('Documento Combinado');
-
   // --- ESTADOS PARA MEJORAR IMAGEN ---
   const [improvementAdjustments, setImprovementAdjustments] = useState({
     brightness: 100,
@@ -85,10 +76,10 @@ export default function ToolsTab({ onStartNewScan }: ToolsTabProps) {
 
   // Cargar documentos del local store para el selector
   useEffect(() => {
-    if (showDocSelector || activeTool === 'combinar') {
+    if (showDocSelector) {
       setAvailableDocs(getDocuments());
     }
-  }, [showDocSelector, activeTool]);
+  }, [showDocSelector]);
 
   // Manejar subida de archivo local
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -144,8 +135,6 @@ export default function ToolsTab({ onStartNewScan }: ToolsTabProps) {
     setSelectedImage(null);
     resetToolStates();
     setShowDocSelector(false);
-    setSelectedDocsToCombine([]);
-    setCombinedDocName('Documento Combinado');
   };
 
   // --- LÓGICA DE RECORTAR (PERSPECTIVA) ---
@@ -299,57 +288,6 @@ export default function ToolsTab({ onStartNewScan }: ToolsTabProps) {
     }
   }, [activeTool, selectedImage, improvementAdjustments]);
 
-  // --- LÓGICA DE COMBINAR ARCHIVOS ---
-  const handleAddDocToCombine = (doc: DocumentItem) => {
-    setSelectedDocsToCombine(prev => [...prev, doc]);
-  };
-
-  const handleRemoveDocFromCombine = (index: number) => {
-    setSelectedDocsToCombine(prev => prev.filter((_, i) => i !== index));
-  };
-
-  const handleMoveDocInCombine = (index: number, direction: 'up' | 'down') => {
-    if (direction === 'up' && index === 0) return;
-    if (direction === 'down' && index === selectedDocsToCombine.length - 1) return;
-
-    const targetIndex = direction === 'up' ? index - 1 : index + 1;
-    const newList = [...selectedDocsToCombine];
-    const temp = newList[index];
-    newList[index] = newList[targetIndex];
-    newList[targetIndex] = temp;
-    setSelectedDocsToCombine(newList);
-  };
-
-  const handleMergeDocuments = () => {
-    if (selectedDocsToCombine.length < 2) {
-      alert('Por favor selecciona al menos 2 documentos para poder combinarlos.');
-      return;
-    }
-
-    // Copiar y aplanar todas las páginas con nuevos IDs para evitar colisiones
-    const mergedPages: ScannedPage[] = [];
-    selectedDocsToCombine.forEach((doc) => {
-      doc.pages.forEach((page) => {
-        mergedPages.push({
-          ...page,
-          id: `page_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-          adjustments: JSON.parse(JSON.stringify(page.adjustments)),
-        });
-      });
-    });
-
-    const newMergedDoc: DocumentItem = {
-      id: `doc_${Date.now()}`,
-      name: combinedDocName.trim() || 'Documento Combinado',
-      createdAt: new Date().toISOString(),
-      pages: mergedPages,
-    };
-
-    saveDocument(newMergedDoc);
-    alert(`¡Éxito! Se han combinado ${selectedDocsToCombine.length} documentos en "${newMergedDoc.name}".`);
-    handleBackToMenu();
-  };
-
   // --- LÓGICA DE GUARDAR / EXPORTAR ---
   const handleDownload = (dataUrl: string) => {
     const link = document.createElement('a');
@@ -427,26 +365,6 @@ export default function ToolsTab({ onStartNewScan }: ToolsTabProps) {
               <ChevronRight size={18} className="text-gray-500 group-hover:text-white transition-colors" />
             </button>
 
-            {/* Opción Combinar Archivos */}
-            <button
-              onClick={() => {
-                setActiveTool('combinar');
-                resetToolStates();
-              }}
-              className="flex items-center gap-4 p-4 rounded-xl border border-[#2C2C2E] bg-[#1C1C1E] hover:bg-[#2C2C2E]/60 hover:border-[#2979FF]/40 transition-all text-left group"
-            >
-              <div className="p-3 rounded-xl bg-[#00E676]/10 text-[#00E676] group-hover:scale-105 transition-transform">
-                <Layers size={24} />
-              </div>
-              <div className="flex-1">
-                <h4 className="text-sm font-bold text-white">Combinar Archivos</h4>
-                <p className="text-[11px] text-gray-400 mt-0.5">
-                  Une varias páginas o múltiples documentos escaneados independientes en un único archivo.
-                </p>
-              </div>
-              <ChevronRight size={18} className="text-gray-500 group-hover:text-white transition-colors" />
-            </button>
-
             {/* Opción Mejorar Imagen */}
             <button
               onClick={() => {
@@ -490,139 +408,14 @@ export default function ToolsTab({ onStartNewScan }: ToolsTabProps) {
               <h2 className="text-base font-bold text-white capitalize">
                 {activeTool === 'recortar' && 'Recortar Perspectiva'}
                 {activeTool === 'borrar' && 'Borrar e Limpiar'}
-                {activeTool === 'combinar' && 'Combinar Archivos'}
                 {activeTool === 'mejorar' && 'Mejorar Claridad'}
                 {activeTool === 'correccion_angulo' && 'Corrección de Ángulo'}
               </h2>
             </div>
           </div>
 
-          {/* HERRAMIENTA: COMBINAR ARCHIVOS */}
-          {activeTool === 'combinar' && (
-            <div className="flex flex-col gap-4 animate-fade-in">
-              <p className="text-xs text-gray-400">
-                Selecciona los documentos que deseas unir. Podrás ordenarlos antes de generar el documento final unificado.
-              </p>
-
-              {/* Documentos Seleccionados en Orden */}
-              <div className="border border-[#2C2C2E] rounded-2xl bg-[#1C1C1E] p-4 flex flex-col gap-3">
-                <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block">
-                  Archivos en Cola de Fusión ({selectedDocsToCombine.length})
-                </span>
-
-                {selectedDocsToCombine.length === 0 ? (
-                  <div className="text-center py-6 text-xs text-gray-500">
-                    Ningún archivo seleccionado. Añade archivos del listado de abajo.
-                  </div>
-                ) : (
-                  <div className="flex flex-col gap-2">
-                    {selectedDocsToCombine.map((doc, idx) => (
-                      <div 
-                        key={`${doc.id}_combine_${idx}`}
-                        className="flex items-center gap-3 p-3 rounded-xl bg-neutral-900 border border-[#2C2C2E]/60"
-                      >
-                        <div className="w-8 h-8 rounded-lg bg-[#2979FF]/10 text-[#2979FF] flex items-center justify-center font-bold text-xs shrink-0">
-                          {idx + 1}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <h4 className="text-xs font-bold text-white truncate">{doc.name}</h4>
-                          <span className="text-[10px] text-gray-500">{doc.pages.length} {doc.pages.length === 1 ? 'página' : 'páginas'}</span>
-                        </div>
-                        
-                        {/* Controles de ordenamiento */}
-                        <div className="flex items-center gap-1">
-                          <button
-                            onClick={() => handleMoveDocInCombine(idx, 'up')}
-                            disabled={idx === 0}
-                            className={`p-1.5 rounded-lg transition-colors ${idx === 0 ? 'text-gray-700' : 'text-gray-400 hover:text-white hover:bg-[#2C2C2E]'}`}
-                            title="Subir"
-                          >
-                            <ArrowUp size={14} />
-                          </button>
-                          <button
-                            onClick={() => handleMoveDocInCombine(idx, 'down')}
-                            disabled={idx === selectedDocsToCombine.length - 1}
-                            className={`p-1.5 rounded-lg transition-colors ${idx === selectedDocsToCombine.length - 1 ? 'text-gray-700' : 'text-gray-400 hover:text-white hover:bg-[#2C2C2E]'}`}
-                            title="Bajar"
-                          >
-                            <ArrowDown size={14} />
-                          </button>
-                          <button
-                            onClick={() => handleRemoveDocFromCombine(idx)}
-                            className="p-1.5 rounded-lg text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors"
-                            title="Quitar"
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Entrada del Nombre Unificado */}
-              {selectedDocsToCombine.length >= 2 && (
-                <div className="flex flex-col gap-1.5 px-1 animate-fade-in">
-                  <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Nombre del Documento Combinado</label>
-                  <input 
-                    type="text"
-                    value={combinedDocName}
-                    onChange={(e) => setCombinedDocName(e.target.value)}
-                    placeholder="Escribe el nombre del nuevo archivo..."
-                    className="w-full bg-[#1C1C1E] border border-[#2C2C2E] rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-[#2979FF]"
-                  />
-                  
-                  <button
-                    onClick={handleMergeDocuments}
-                    className="w-full mt-2 py-3 px-4 rounded-xl text-xs font-bold bg-[#00E676] hover:bg-[#00E676]/90 text-neutral-950 flex items-center justify-center gap-1.5 shadow-lg shadow-[#00E676]/20 transition-all"
-                  >
-                    <Check size={14} strokeWidth={3} />
-                    Combinar en un Solo Archivo
-                  </button>
-                </div>
-              )}
-
-              {/* Documentos Disponibles para Agregar */}
-              <div className="border border-[#2C2C2E] rounded-2xl bg-[#1C1C1E] p-4 flex flex-col gap-3">
-                <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block">
-                  Selecciona Documentos para Añadir
-                </span>
-
-                {availableDocs.length === 0 ? (
-                  <p className="text-xs text-gray-500 text-center py-6">No tienes documentos guardados aún.</p>
-                ) : (
-                  <div className="flex flex-col gap-2 max-h-[300px] overflow-y-auto">
-                    {availableDocs.map((doc) => (
-                      <div 
-                        key={doc.id}
-                        className="flex items-center justify-between p-2.5 rounded-xl bg-neutral-900/40 border border-[#2C2C2E]/40 hover:bg-neutral-900 transition-colors"
-                      >
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <FileText size={16} className="text-[#2979FF] shrink-0" />
-                          <div className="min-w-0">
-                            <span className="text-xs font-semibold text-white block truncate">{doc.name}</span>
-                            <span className="text-[9px] text-gray-500">{doc.pages.length} {doc.pages.length === 1 ? 'pág' : 'págs'}</span>
-                          </div>
-                        </div>
-
-                        <button
-                          onClick={() => handleAddDocToCombine(doc)}
-                          className="p-1.5 rounded-lg bg-[#2979FF]/10 text-[#2979FF] hover:bg-[#2979FF] hover:text-white transition-all flex items-center gap-1 text-[10px] font-bold"
-                        >
-                          <Plus size={12} strokeWidth={3} />
-                          Añadir
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
           {/* PASO 1: SELECCIONAR IMAGEN (PARA RECORTAR / BORRAR / MEJORAR / CORRECCIÓN ÁNGULO / HERRAMIENTAS EDICIÓN) */}
-          {activeTool !== 'combinar' && !selectedImage && (
+          {!selectedImage && (
             <div className="flex flex-col gap-4 animate-fade-in">
               <p className="text-xs text-gray-400">
                 Selecciona una foto existente o sube una nueva imagen para comenzar a procesar.
